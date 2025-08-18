@@ -12,6 +12,8 @@ public:
 
     void createUser(const std::string& username, const std::string& password);
 
+    void createUserByAdmin(const User& actor, const std::string& username, const std::string& password);
+
     void deleteUser(const User& actor, const std::string& usernameToDelete);
 
     /**

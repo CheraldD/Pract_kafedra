@@ -6,7 +6,8 @@ enum class Permission {
     READ,
     WRITE,
     COPY_MOVE,
-    DELETE_USER
+    DELETE_USER,
+    CREATE_USER
 };
 
 class PermissionManager {
@@ -29,6 +30,7 @@ public:
                 case Permission::COPY_MOVE:
                     return true;
                 case Permission::DELETE_USER:
+                case Permission::CREATE_USER:
                     return false;
             }
         }

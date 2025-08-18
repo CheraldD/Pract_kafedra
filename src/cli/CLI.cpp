@@ -94,7 +94,7 @@ void CLI::handleAuthScreen() {
               << "\n║ 2. Регистрация                    ║"
               << "\n║ 0. Выход                          ║"
               << "\n╚═══════════════════════════════════╝" << std::endl;
-    std::cout << "> " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
+    std::cout << "> " << std::flush;
     int choice;
     std::cin >> choice;
 
@@ -118,10 +118,10 @@ void CLI::handleLogin() {
     std::cout << "\n--- Вход в систему ---" << std::endl;
     std::string username, password;
 
-    std::cout << "Имя пользователя: " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
+    std::cout << "Имя пользователя: " << std::flush;
     std::getline(std::cin, username);
     
-    std::cout << "Пароль: " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
+    std::cout << "Пароль: " << std::flush;
     password = getMaskedPassword(); 
     
     try {
@@ -140,13 +140,13 @@ void CLI::handleRegistration() {
     std::cout << "\n--- Регистрация нового пользователя ---" << std::endl;
     std::string username, password, passwordConfirm;
     
-    std::cout << "Введите новое имя пользователя: " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
+    std::cout << "Введите новое имя пользователя: " << std::flush;
     std::getline(std::cin, username);
     
-    std::cout << "Введите пароль (мин. 4 символа): " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
+    std::cout << "Введите пароль (мин. 4 символа): " << std::flush;
     password = getMaskedPassword();
 
-    std::cout << "Подтвердите пароль: " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
+    std::cout << "Подтвердите пароль: " << std::flush;
     passwordConfirm = getMaskedPassword();
 
     if (password != passwordConfirm) {
@@ -173,11 +173,14 @@ void CLI::showMainMenu() const {
     if (PermissionManager::has(*m_currentUser, Permission::DELETE_USER)) {
         std::cout << "\n║ 5. Удалить пользователя (Админ)     ║";
     }
+    if (PermissionManager::has(*m_currentUser, Permission::CREATE_USER)) {
+        std::cout << "\n║ 6. Создать пользователя (Админ)      ║";
+    }
     std::cout << "\n╠═══════════════════════════════════╣"
               << "\n║ 9. Выйти из аккаунта              ║"
               << "\n║ 0. Выйти из приложения            ║"
               << "\n╚═══════════════════════════════════╝" << std::endl;
-    std::cout << "> " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
+    std::cout << "> " << std::flush;
 }
 
 void CLI::handleUserActions() {
@@ -270,6 +273,26 @@ void CLI::handleUserActions() {
 
                     m_userManager.deleteUser(*m_currentUser, usernameToDelete);
                     std::cout << "\n[✓] Пользователь '" << usernameToDelete << "' успешно удален." << std::endl;
+                    break;
+                }
+                case 6: {
+                    if (!PermissionManager::has(*m_currentUser, Permission::CREATE_USER)) {
+                        std::cout << "\n[✗] Неизвестная команда." << std::endl;
+                        break;
+                    }
+
+                    std::cout << "\n--- Создание нового пользователя ---" << std::endl;
+                    std::string newUsername, newPassword;
+
+                    std::cout << "-> Введите имя нового пользователя (или '" << CANCEL_COMMAND << "'): " << std::flush;
+                    std::getline(std::cin, newUsername);
+                    if (newUsername == CANCEL_COMMAND || newUsername.empty()) break;
+
+                    std::cout << "-> Введите пароль (мин. 4 символа): " << std::flush;
+                    newPassword = getMaskedPassword();
+
+                    m_userManager.createUserByAdmin(*m_currentUser, newUsername, newPassword);
+                    std::cout << "\n[✓] Пользователь '" << newUsername << "' успешно создан." << std::endl;
                     break;
                 }
                 case 9:

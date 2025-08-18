@@ -1,7 +1,8 @@
 # Полный Исходный Код Проекта Системы Управления Доступом
-_Сгенерировано: 2025-08-17 18:34:05_
+_Сгенерировано: 2025-08-18 23:55:20_
 
 ## Содержание
+- [`src/auth/AuthExceptions.h`](#srcauthAuthExceptionsh)
 - [`src/auth/Authenticator.cpp`](#srcauthAuthenticatorcpp)
 - [`src/auth/Authenticator.h`](#srcauthAuthenticatorh)
 - [`src/cli/CLI.cpp`](#srccliCLIcpp)
@@ -26,31 +27,74 @@ _Сгенерировано: 2025-08-17 18:34:05_
 
 ---
 
+## <a name="srcauthAuthExceptionsh"></a>Файл: `src/auth/AuthExceptions.h`
+
+```cpp
+#pragma once
+#include <stdexcept>
+
+/**
+ * @brief Базовый класс для всех исключений аутентификации.
+ */
+class AuthenticationException : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
+/**
+ * @brief Исключение, выбрасываемое, когда пользователь не найден.
+ */
+class UserNotFoundException : public AuthenticationException {
+public:
+    using AuthenticationException::AuthenticationException;
+};
+
+/**
+ * @brief Исключение, выбрасываемое, когда аккаунт пользователя заблокирован.
+ */
+class AccountLockedException : public AuthenticationException {
+public:
+    using AuthenticationException::AuthenticationException;
+};
+
+/**
+ * @brief Исключение, выбрасываемое, когда предоставлен неверный пароль.
+ */
+class InvalidCredentialsException : public AuthenticationException {
+public:
+    using AuthenticationException::AuthenticationException;
+};
+```
+
+---
+
 ## <a name="srcauthAuthenticatorcpp"></a>Файл: `src/auth/Authenticator.cpp`
 
 ```cpp
 #include "Authenticator.h"
 #include "../core/User.h"
 #include "../utils/Hash.h"
+#include "AuthExceptions.h"
 
 Authenticator::Authenticator(IUserRepository& repo, ILogger& logger, int maxAttempts)
     : m_userRepository(repo),
       m_logger(logger),
       m_maxFailedAttempts(maxAttempts) {}
 
-std::shared_ptr<User> Authenticator::login(const std::string& username, const std::string& password) {
+std::shared_ptr<User> Authenticator::login(const std::string& username, const std::string& password) noexcept(false) {
     auto user = m_userRepository.findByUsername(username);
 
     if (!user) {
         m_logger.log("Неудачная попытка входа: пользователь '" + username + "' не найден.");
-        return nullptr;
+        throw UserNotFoundException("Пользователь с таким именем не найден.");
     }
 
     if (user->isLocked()) {
         m_logger.log("Попытка входа в заблокированный аккаунт: '" + username + "'.");
-        return nullptr;
+        throw AccountLockedException("Этот аккаунт заблокирован. Обратитесь к администратору.");
     }
 
+    // Если пароль верный
     if (user->getPasswordHash() == hashPassword(password)) {
         m_logger.log("Пользователь '" + username + "' успешно вошел в систему.");
         if (user->getFailedLoginAttempts() > 0) {
@@ -58,19 +102,28 @@ std::shared_ptr<User> Authenticator::login(const std::string& username, const st
             m_userRepository.update(user);
         }
         return user;
-    } else {
-        user->incrementFailedAttempts();
-        m_logger.log("Неудачная попытка входа для пользователя '" + username + 
-                     "'. Попытка " + std::to_string(user->getFailedLoginAttempts()) + 
-                     " из " + std::to_string(m_maxFailedAttempts) + ".");
+    } 
+    // Если пароль неверный
+    else {
+        // ИЗМЕНЕНИЕ: Добавляем проверку роли перед блокировкой
+        if (user->getRole() == Role::ADMIN) {
+            // Если это админ, просто логируем ошибку, но не блокируем
+            m_logger.log("!!! ВНИМАНИЕ: Неудачная попытка входа под учетной записью АДМИНИСТРАТОРА '" + username + "'.");
+        } else {
+            // Для обычных пользователей оставляем старую логику
+            user->incrementFailedAttempts();
+            m_logger.log("Неудачная попытка входа для пользователя '" + username + 
+                         "'. Попытка " + std::to_string(user->getFailedLoginAttempts()) + 
+                         " из " + std::to_string(m_maxFailedAttempts) + ".");
 
-        if (user->getFailedLoginAttempts() >= m_maxFailedAttempts) {
-            user->lock();
-            m_logger.log("Аккаунт пользователя '" + username + "' заблокирован из-за большого количества неудачных попыток входа.");
+            if (user->getFailedLoginAttempts() >= m_maxFailedAttempts) {
+                user->lock();
+                m_logger.log("Аккаунт пользователя '" + username + "' заблокирован из-за большого количества неудачных попыток входа.");
+            }
+            m_userRepository.update(user);
         }
         
-        m_userRepository.update(user);
-        return nullptr;
+        throw InvalidCredentialsException("Неверный пароль.");
     }
 }
 ```
@@ -92,20 +145,15 @@ class User; // Forward declaration
  */
 class Authenticator {
 public:
-    /**
-     * @param repo Репозиторий для доступа к данным пользователей.
-     * @param logger Логгер для записи событий.
-     * @param maxAttempts Максимальное число неудачных попыток входа до блокировки.
-     */
     Authenticator(IUserRepository& repo, ILogger& logger, int maxAttempts = 3);
 
     /**
      * @brief Выполняет попытку входа пользователя в систему.
-     * @param username Имя пользователя.
-     * @param password Пароль в открытом виде.
-     * @return Умный указатель на объект User в случае успеха, иначе nullptr.
+     * @return Умный указатель на объект User в случае успеха.
+     * @throws AuthenticationException если аутентификация не удалась (например,
+     *         UserNotFoundException, AccountLockedException, InvalidCredentialsException).
      */
-    std::shared_ptr<User> login(const std::string& username, const std::string& password);
+    std::shared_ptr<User> login(const std::string& username, const std::string& password) noexcept(false);
 
 private:
     IUserRepository& m_userRepository;
@@ -123,53 +171,104 @@ private:
 #include <iostream>
 #include <limits>
 #include <string>
+#include <vector>
+
+// Платформо-зависимые заголовочные файлы
+#ifdef _WIN32
+#include <conio.h>
+#else
+#include <termios.h>
+#include <unistd.h>
+#endif
 
 #include "../auth/Authenticator.h"
+#include "../auth/AuthExceptions.h"
 #include "../services/UserManager.h"
 #include "../services/FileManager.h"
 #include "../services/PermissionManager.h"
 #include "../core/User.h"
 
 namespace {
+    const std::string CANCEL_COMMAND = "cancel";
+
     void clearInputBuffer() {
         std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    }
+
+    std::string getMaskedPassword() {
+        std::string password;
+        char ch;
+
+#ifdef _WIN32
+        while ((ch = _getch()) != '\r') {
+            if (ch == '\b') {
+                if (!password.empty()) {
+                    password.pop_back();
+                    std::cout << "\b \b";
+                }
+            } else {
+                password += ch;
+                std::cout << '*';
+            }
+        }
+#else
+        termios oldt, newt;
+        tcgetattr(STDIN_FILENO, &oldt);
+        newt = oldt;
+        newt.c_lflag &= ~(ECHO | ICANON);
+        tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+
+        while (read(STDIN_FILENO, &ch, 1) > 0 && ch != '\n') {
+            if (ch == 127 || ch == 8) {
+                if (!password.empty()) {
+                    password.pop_back();
+                    std::cout << "\b \b" << std::flush;
+                }
+            } else {
+                password += ch;
+                std::cout << '*' << std::flush;
+            }
+        }
+        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+#endif
+        std::cout << std::endl;
+        return password;
     }
 }
 
 CLI::CLI(Authenticator& auth, UserManager& userManager, FileManager& fileManager)
-    : m_auth(auth), 
+    : m_auth(auth),
       m_userManager(userManager),
       m_fileManager(fileManager),
-      m_currentUser(nullptr) {}
+      m_currentUser(nullptr),
+      m_shouldRun(true) {}
 
 void CLI::run() {
-    while (true) {
+    while (m_shouldRun) {
         if (!m_currentUser) {
             handleAuthScreen();
         }
-        
         if (m_currentUser) {
             handleUserActions();
-        } else {
-            // Если пользователь выбрал выход на экране аутентификации
-            break;
         }
     }
-    std::cout << "\nЗавершение работы. До свидания!" << std::endl;
+    std::cout << "\n[✓] Завершение работы. До свидания!" << std::endl;
 }
 
 void CLI::handleAuthScreen() {
-    std::cout << "\n--- Система Управления Доступом ---" << std::endl;
-    std::cout << "1. Вход" << std::endl;
-    std::cout << "2. Регистрация" << std::endl;
-    std::cout << "0. Выход" << std::endl;
-    std::cout << "> ";
-
+    std::cout << "\n╔═══════════════════════════════════╗"
+              << "\n║    Система Управления Доступом    ║"
+              << "\n╠═══════════════════════════════════╣"
+              << "\n║ 1. Вход                           ║"
+              << "\n║ 2. Регистрация                    ║"
+              << "\n║ 0. Выход                          ║"
+              << "\n╚═══════════════════════════════════╝" << std::endl;
+    std::cout << "> " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
     int choice;
     std::cin >> choice;
 
     if (std::cin.fail()) {
-        std::cout << "Некорректный ввод. Пожалуйста, введите число." << std::endl;
+        std::cout << "\n[✗] Некорректный ввод. Пожалуйста, введите число." << std::endl;
         std::cin.clear();
         clearInputBuffer();
         return;
@@ -177,18 +276,10 @@ void CLI::handleAuthScreen() {
     clearInputBuffer();
 
     switch (choice) {
-        case 1:
-            handleLogin();
-            break;
-        case 2:
-            handleRegistration();
-            break;
-        case 0:
-            // m_currentUser останется nullptr, что приведет к выходу из главного цикла
-            break;
-        default:
-            std::cout << "Неизвестная команда." << std::endl;
-            break;
+        case 1: handleLogin(); break;
+        case 2: handleRegistration(); break;
+        case 0: m_shouldRun = false; break;
+        default: std::cout << "\n[✗] Неизвестная команда." << std::endl; break;
     }
 }
 
@@ -196,18 +287,21 @@ void CLI::handleLogin() {
     std::cout << "\n--- Вход в систему ---" << std::endl;
     std::string username, password;
 
-    std::cout << "Имя пользователя: ";
-    std::cin >> username;
+    std::cout << "Имя пользователя: " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
+    std::getline(std::cin, username);
     
-    std::cout << "Пароль: ";
-    std::cin >> password;
+    std::cout << "Пароль: " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
+    password = getMaskedPassword(); 
     
-    m_currentUser = m_auth.login(username, password);
-    
-    if (!m_currentUser) {
-        std::cout << "Ошибка входа. Неверные учетные данные или аккаунт заблокирован.\n" << std::endl;
-    } else {
-        std::cout << "Добро пожаловать, " << m_currentUser->getUsername() << "!" << std::endl;
+    try {
+        m_currentUser = m_auth.login(username, password);
+        std::cout << "\n[✓] Добро пожаловать, " << m_currentUser->getUsername() << "!" << std::endl;
+    } 
+    catch (const AuthenticationException& e) {
+        std::cout << "\n[✗] Ошибка входа: " << e.what() << std::endl;
+    } 
+    catch (const std::exception& e) {
+        std::cerr << "\n[✗] Произошла непредвиденная системная ошибка: " << e.what() << std::endl;
     }
 }
 
@@ -215,50 +309,54 @@ void CLI::handleRegistration() {
     std::cout << "\n--- Регистрация нового пользователя ---" << std::endl;
     std::string username, password, passwordConfirm;
     
-    std::cout << "Введите новое имя пользователя: ";
-    std::cin >> username;
+    std::cout << "Введите новое имя пользователя: " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
+    std::getline(std::cin, username);
     
-    std::cout << "Введите пароль (мин. 4 символа): ";
-    std::cin >> password;
+    std::cout << "Введите пароль (мин. 4 символа): " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
+    password = getMaskedPassword();
 
-    std::cout << "Подтвердите пароль: ";
-    std::cin >> passwordConfirm;
+    std::cout << "Подтвердите пароль: " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
+    passwordConfirm = getMaskedPassword();
 
     if (password != passwordConfirm) {
-        std::cout << "Ошибка: пароли не совпадают." << std::endl;
+        std::cout << "\n[✗] Ошибка: пароли не совпадают." << std::endl;
         return;
     }
 
     try {
         m_userManager.createUser(username, password);
-        std::cout << "Пользователь '" << username << "' успешно зарегистрирован. Теперь вы можете войти." << std::endl;
+        std::cout << "\n[✓] Пользователь '" << username << "' успешно зарегистрирован. Теперь вы можете войти." << std::endl;
     } catch (const std::exception& e) {
-        std::cerr << "Ошибка регистрации: " << e.what() << std::endl;
+        std::cerr << "\n[✗] Ошибка регистрации: " << e.what() << std::endl;
     }
 }
 
 void CLI::showMainMenu() const {
-    std::cout << "\n--- Главное меню (Пользователь: " << m_currentUser->getUsername() << ") ---" << std::endl;
-    std::cout << "1. Прочитать файл" << std::endl;
-    std::cout << "2. Записать в файл" << std::endl;
-    std::cout << "3. Копировать файл" << std::endl;
-    std::cout << "4. Переместить файл" << std::endl;
+    std::cout << "\n╔═══════════════════════════════════╗"
+              << "\n║ Меню (Пользователь: " << m_currentUser->getUsername() << ")"
+              << "\n╠═══════════════════════════════════╣"
+              << "\n║ 1. Прочитать файл                 ║"
+              << "\n║ 2. Записать в файл                ║"
+              << "\n║ 3. Копировать файл                ║"
+              << "\n║ 4. Переместить файл               ║";
     if (PermissionManager::has(*m_currentUser, Permission::DELETE_USER)) {
-        std::cout << "5. Удалить пользователя (только для Администратора)" << std::endl;
+        std::cout << "\n║ 5. Удалить пользователя (Админ)     ║";
     }
-    std::cout << "9. Выйти из аккаунта" << std::endl;
-    std::cout << "0. Выйти из приложения" << std::endl;
-    std::cout << "> ";
+    std::cout << "\n╠═══════════════════════════════════╣"
+              << "\n║ 9. Выйти из аккаунта              ║"
+              << "\n║ 0. Выйти из приложения            ║"
+              << "\n╚═══════════════════════════════════╝" << std::endl;
+    std::cout << "> " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
 }
 
 void CLI::handleUserActions() {
     int choice = -1;
-    while (m_currentUser) {
+    while (m_currentUser && m_shouldRun) {
         showMainMenu();
         std::cin >> choice;
 
         if (std::cin.fail()) {
-            std::cout << "Некорректный ввод. Пожалуйста, введите число." << std::endl;
+            std::cout << "\n[✗] Некорректный ввод. Пожалуйста, введите число." << std::endl;
             std::cin.clear();
             clearInputBuffer();
             choice = -1;
@@ -267,58 +365,96 @@ void CLI::handleUserActions() {
         
         clearInputBuffer();
 
-        std::string path1, path2, content, usernameToDelete;
-
         try {
             switch (choice) {
-                case 1:
-                    std::cout << "Введите путь к файлу для чтения: ";
-                    std::getline(std::cin, path1);
-                    m_fileManager.readFile(*m_currentUser, path1);
+                case 1: {
+                    std::cout << "-> Введите путь к файлу для чтения (или '" << CANCEL_COMMAND << "'): " << std::flush;
+                    std::string path;
+                    std::getline(std::cin, path);
+                    if (path == CANCEL_COMMAND || path.empty()) break;
+                    m_fileManager.readFile(*m_currentUser, path);
                     break;
-                case 2:
-                    std::cout << "Введите путь к файлу для записи: ";
-                    std::getline(std::cin, path1);
-                    std::cout << "Введите содержимое (одной строкой): ";
+                }
+                case 2: {
+                    std::cout << "-> Введите путь к файлу для записи (или '" << CANCEL_COMMAND << "'): " << std::flush;
+                    std::string path;
+                    std::getline(std::cin, path);
+                    if (path == CANCEL_COMMAND || path.empty()) break;
+
+                    std::cout << "-> Введите содержимое (одной строкой): " << std::flush;
+                    std::string content;
                     std::getline(std::cin, content);
-                    m_fileManager.writeFile(*m_currentUser, path1, content);
+                    m_fileManager.writeFile(*m_currentUser, path, content);
+                    std::cout << "\n[✓] Запись в файл '" << path << "' успешно завершена." << std::endl;
                     break;
-                case 3:
-                    std::cout << "Введите путь к исходному файлу: ";
-                    std::getline(std::cin, path1);
-                    std::cout << "Введите путь к файлу назначения: ";
-                    std::getline(std::cin, path2);
-                    m_fileManager.copyFile(*m_currentUser, path1, path2);
+                }
+                case 3: {
+                    std::cout << "-> Введите путь к исходному файлу (или '" << CANCEL_COMMAND << "'): " << std::flush;
+                    std::string source;
+                    std::getline(std::cin, source);
+                    if (source == CANCEL_COMMAND || source.empty()) break;
+
+                    std::cout << "-> Введите путь к файлу/папке назначения: " << std::flush;
+                    std::string dest;
+                    std::getline(std::cin, dest);
+                    if (dest == CANCEL_COMMAND || dest.empty()) break;
+
+                    m_fileManager.copyFile(*m_currentUser, source, dest);
+                    std::cout << "\n[✓] Файл '" << source << "' успешно скопирован." << std::endl;
                     break;
-                case 4:
-                    std::cout << "Введите путь к исходному файлу: ";
-                    std::getline(std::cin, path1);
-                    std::cout << "Введите путь к файлу назначения: ";
-                    std::getline(std::cin, path2);
-                    m_fileManager.moveFile(*m_currentUser, path1, path2);
+                }
+                case 4: {
+                    std::cout << "-> Введите путь к исходному файлу (или '" << CANCEL_COMMAND << "'): " << std::flush;
+                    std::string source;
+                    std::getline(std::cin, source);
+                    if (source == CANCEL_COMMAND || source.empty()) break;
+
+                    std::cout << "-> Введите путь к файлу/папке назначения: " << std::flush;
+                    std::string dest;
+                    std::getline(std::cin, dest);
+                    if (dest == CANCEL_COMMAND || dest.empty()) break;
+
+                    m_fileManager.moveFile(*m_currentUser, source, dest);
+                    std::cout << "\n[✓] Файл '" << source << "' успешно перемещен." << std::endl;
                     break;
-                case 5:
-                    if (PermissionManager::has(*m_currentUser, Permission::DELETE_USER)) {
-                        std::cout << "Введите имя пользователя для удаления: ";
-                        std::getline(std::cin, usernameToDelete);
-                        m_userManager.deleteUser(*m_currentUser, usernameToDelete);
-                        std::cout << "Пользователь '" << usernameToDelete << "' успешно удален." << std::endl;
-                    } else { std::cout << "Неизвестная команда." << std::endl; }
+                }
+                case 5: {
+                    if (!PermissionManager::has(*m_currentUser, Permission::DELETE_USER)) {
+                        std::cout << "\n[✗] Неизвестная команда." << std::endl;
+                        break;
+                    }
+                    std::cout << "\n--- Список Пользователей ---" << std::endl;
+                    const auto users = m_userManager.listAllUsers(*m_currentUser);
+                    for (const auto& user : users) {
+                        std::cout << "- " << user->getUsername()
+                                  << " (Роль: " << (user->getRole() == Role::ADMIN ? "Админ" : "Пользователь") << ")"
+                                  << (user->isLocked() ? " [ЗАБЛОКИРОВАН]" : "") << std::endl;
+                    }
+                    std::cout << "--------------------------\n";
+
+                    std::cout << "-> Введите имя пользователя для удаления (или '" << CANCEL_COMMAND << "'): " << std::flush;
+                    std::string usernameToDelete;
+                    std::getline(std::cin, usernameToDelete);
+                    if (usernameToDelete == CANCEL_COMMAND || usernameToDelete.empty()) break;
+
+                    m_userManager.deleteUser(*m_currentUser, usernameToDelete);
+                    std::cout << "\n[✓] Пользователь '" << usernameToDelete << "' успешно удален." << std::endl;
                     break;
+                }
                 case 9:
                     m_currentUser = nullptr;
-                    std::cout << "Вы вышли из системы." << std::endl;
+                    std::cout << "\n[✓] Вы вышли из системы." << std::endl;
                     break;
                 case 0:
+                    m_shouldRun = false;
                     m_currentUser = nullptr;
-                    // Этот return приведет к выходу из цикла в run(), так как m_currentUser == nullptr
-                    return;
+                    break;
                 default:
-                    std::cout << "Неизвестная команда. Попробуйте еще раз." << std::endl;
+                    std::cout << "\n[✗] Неизвестная команда. Попробуйте еще раз." << std::endl;
                     break;
             }
         } catch (const std::exception& e) {
-            std::cerr << "Операция не удалась: " << e.what() << std::endl;
+            std::cerr << "\n[✗] Операция не удалась: " << e.what() << std::endl;
         }
     }
 }
@@ -343,7 +479,6 @@ public:
     void run();
 
 private:
-    // Новые приватные методы для UI
     void handleAuthScreen();
     void handleLogin();
     void handleRegistration();
@@ -354,6 +489,7 @@ private:
     UserManager& m_userManager;
     FileManager& m_fileManager;
     std::shared_ptr<User> m_currentUser;
+    bool m_shouldRun; // Флаг для контроля основного цикла программы
 };
 ```
 
@@ -389,42 +525,24 @@ public:
 ```cpp
 #pragma once
 #include <string>
-#include <memory> // для std::shared_ptr
+#include <memory>
+#include <vector>
 
-// Предварительное объявление, чтобы избежать включения полного заголовка User.h,
-// если это не нужно, и ускорить компиляцию.
 class User; 
 
-/**
- * @brief Абстрактный интерфейс для репозитория пользователей.
- * Определяет контракт для всех операций по доступу к данным пользователей.
- */
 class IUserRepository {
 public:
     virtual ~IUserRepository() = default;
-
-    // Использование умных указателей (shared_ptr) - хорошая практика для управления
-    // временем жизни объектов, передаваемых между модулями.
     
-    /**
-     * @brief Находит пользователя по его имени.
-     * @return Указатель на пользователя, если найден, иначе nullptr.
-     */
     virtual std::shared_ptr<User> findByUsername(const std::string& username) = 0;
 
-    /**
-     * @brief Добавляет нового пользователя в хранилище.
-     */
+    // ОБЯЗАТЕЛЬНОЕ ДОБАВЛЕНИЕ: объявляем метод в интерфейсе
+    virtual std::vector<std::shared_ptr<User>> getAll() = 0;
+
     virtual void add(std::shared_ptr<User> user) = 0;
     
-    /**
-     * @brief Обновляет данные существующего пользователя в хранилище.
-     */
     virtual void update(std::shared_ptr<User> user) = 0;
 
-    /**
-     * @brief Удаляет пользователя из хранилища по его имени.
-     */
     virtual void remove(const std::string& username) = 0;
 };
 ```
@@ -673,15 +791,13 @@ private:
 #include <sstream>
 #include <stdexcept>
 #include <iostream>
-
-// (Этот файл практически не изменился, только сообщения об ошибках)
+#include <vector>
 
 FileUserRepository::FileUserRepository(const std::string& dbPath) : m_dbPath(dbPath) {
     loadFromFile();
 }
 
 void FileUserRepository::loadFromFile() {
-    // ... реализация без изменений
     std::ifstream file(m_dbPath);
     if (!file.is_open()) return;
     std::string line;
@@ -730,6 +846,16 @@ std::shared_ptr<User> FileUserRepository::findByUsername(const std::string& user
     return (it != m_usersCache.end()) ? it->second : nullptr;
 }
 
+std::vector<std::shared_ptr<User>> FileUserRepository::getAll() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<std::shared_ptr<User>> allUsers;
+    allUsers.reserve(m_usersCache.size());
+    for (const auto& pair : m_usersCache) {
+        allUsers.push_back(pair.second);
+    }
+    return allUsers;
+}
+
 void FileUserRepository::add(std::shared_ptr<User> user) {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_usersCache.count(user->getUsername())) {
@@ -768,6 +894,7 @@ void FileUserRepository::remove(const std::string& username) {
 #include <map>
 #include <memory>
 #include <mutex>
+#include <vector>
 
 class FileUserRepository : public IUserRepository {
 public:
@@ -778,6 +905,7 @@ public:
     FileUserRepository& operator=(const FileUserRepository&) = delete;
 
     std::shared_ptr<User> findByUsername(const std::string& username) override;
+    std::vector<std::shared_ptr<User>> getAll() override;
     void add(std::shared_ptr<User> user) override;
     void update(std::shared_ptr<User> user) override;
     void remove(const std::string& username) override;
@@ -787,9 +915,7 @@ private:
     void saveToFile();
     
     std::string m_dbPath;
-    // Кэш для быстрого доступа. Ключ - username.
     std::map<std::string, std::shared_ptr<User>> m_usersCache;
-    // Мьютекс для защиты кэша и файла от одновременного доступа
     std::mutex m_mutex;
 };
 ```
@@ -801,6 +927,7 @@ private:
 ```cpp
 #include <iostream>
 #include <memory>
+#include <string>
 #include "infrastructure/FileLogger.h"
 #include "infrastructure/FileUserRepository.h"
 #include "auth/Authenticator.h"
@@ -810,9 +937,10 @@ private:
 
 
 int main() {
+    const std::string LOG_FILE_PATH = "app_activity.log";
     
     try {
-        FileLogger logger("app_activity.log");
+        FileLogger logger(LOG_FILE_PATH);
         FileUserRepository userRepo("users.data");
 
         if (!userRepo.findByUsername("admin")) {
@@ -823,7 +951,7 @@ int main() {
         
         Authenticator auth(userRepo, logger);
         UserManager userManager(userRepo, logger);
-        FileManager fileManager(logger);
+        FileManager fileManager(logger, LOG_FILE_PATH);
         
         CLI cli(auth, userManager, fileManager);
         cli.run();
@@ -849,14 +977,53 @@ int main() {
 #include <filesystem>
 #include <iostream>
 
-FileManager::FileManager(ILogger& logger) : m_logger(logger) {}
+// Конструктор, который принимает логгер и путь к файлу журнала для его защиты
+FileManager::FileManager(ILogger& logger, const std::string& logFilePath) 
+    : m_logger(logger), m_logFilePath(logFilePath) {}
+
+namespace {
+    /**
+     * @brief ВАЖНАЯ ФУНКЦИЯ: Создает родительские директории для указанного пути.
+     * 
+     * Проверяет, существует ли родительский каталог для файла,
+     * и если нет, рекурсивно создает всю необходимую структуру.
+     * @param path Путь к конечному файлу.
+     */
+    void ensureDirectoryExists(const std::filesystem::path& path) {
+        auto parentDir = path.parent_path();
+        if (!parentDir.empty() && !std::filesystem::exists(parentDir)) {
+            // Эта команда создает все несуществующие папки в пути
+            std::filesystem::create_directories(parentDir);
+        }
+    }
+}
 
 void FileManager::readFile(const User& actor, const std::string& filePath) {
     PermissionManager::ensure(actor, Permission::READ);
+
+    if (std::filesystem::exists(filePath) && std::filesystem::equivalent(filePath, m_logFilePath)) {
+        if (actor.getRole() != Role::ADMIN) {
+            m_logger.log("ОТКАЗ: Пользователь '" + actor.getUsername() + "' попытался прочитать файл журнала.");
+            throw std::runtime_error("Доступ к файлу журнала разрешен только администраторам.");
+        }
+    }
+
+    // Если файл не существует, он создается
+    if (!std::filesystem::exists(filePath)) {
+        std::ofstream newFile(filePath); 
+        if (!newFile.is_open()) {
+             m_logger.log("ОШИБКА: Пользователь '" + actor.getUsername() + "' пытался прочитать несуществующий файл '" + filePath + "', но создать его не удалось.");
+             throw std::runtime_error("Файл не существует и не может быть создан: " + filePath + ". Проверьте права доступа.");
+        }
+        newFile.close();
+        std::cout << "Файл '" << filePath << "' не найден и был создан." << std::endl;
+        m_logger.log("УСПЕХ: Пользователь '" + actor.getUsername() + "' запросил чтение несуществующего файла '" + filePath + "'. Файл создан.");
+        return;
+    }
     
     std::ifstream file(filePath);
     if (!file.is_open()) {
-        m_logger.log("ОШИБКА: Пользователь '" + actor.getUsername() + "' не смог прочитать файл '" + filePath + "'. Причина: Файл не найден или отказано в доступе ОС.");
+        m_logger.log("ОШИБКА: Пользователь '" + actor.getUsername() + "' не смог прочитать файл '" + filePath + "'. Причина: Отказано в доступе ОС.");
         throw std::runtime_error("Не удалось открыть файл для чтения: " + filePath);
     }
 
@@ -873,10 +1040,25 @@ void FileManager::readFile(const User& actor, const std::string& filePath) {
 void FileManager::writeFile(const User& actor, const std::string& filePath, const std::string& content) {
     PermissionManager::ensure(actor, Permission::WRITE);
 
+    if (std::filesystem::exists(filePath) && std::filesystem::equivalent(filePath, m_logFilePath)) {
+        if (actor.getRole() != Role::ADMIN) {
+             m_logger.log("ОТКАЗ: Пользователь '" + actor.getUsername() + "' попытался записать в файл журнала.");
+             throw std::runtime_error("Доступ к файлу журнала разрешен только администраторам.");
+        }
+    }
+
+    try {
+        // Убеждаемся, что директория для файла существует (создаем, если нужно)
+        ensureDirectoryExists(filePath);
+    } catch (const std::filesystem::filesystem_error& e) {
+         m_logger.log("ОШИБКА: Пользователь '" + actor.getUsername() + "' не смог записать в файл '" + filePath + "'. Причина: не удалось создать директорию назначения. " + e.what());
+         throw std::runtime_error("Операция записи не удалась. Убедитесь, что у вас есть права на запись в эту директорию. Системная ошибка: " + std::string(e.what()));
+    }
+
     std::ofstream file(filePath);
     if (!file.is_open()) {
-        m_logger.log("ОШИБКА: Пользователь '" + actor.getUsername() + "' не смог записать в файл '" + filePath + "'. Причина: Не удалось открыть файл.");
-        throw std::runtime_error("Не удалось открыть файл для записи: " + filePath);
+        m_logger.log("ОШИБКА: Пользователь '" + actor.getUsername() + "' не смог записать в файл '" + filePath + "'. Причина: Не удалось открыть файл (возможно, нет прав доступа).");
+        throw std::runtime_error("Не удалось открыть файл для записи: " + filePath + ". Проверьте права доступа.");
     }
 
     file << content;
@@ -889,26 +1071,72 @@ void FileManager::writeFile(const User& actor, const std::string& filePath, cons
     m_logger.log("УСПЕХ: Пользователь '" + actor.getUsername() + "' записал " + std::to_string(content.length()) + " байт в файл '" + filePath + "'.");
 }
 
-void FileManager::copyFile(const User& actor, const std::string& sourcePath, const std::string& destPath) {
+void FileManager::copyFile(const User& actor, const std::string& sourceStr, const std::string& destStr) {
     PermissionManager::ensure(actor, Permission::COPY_MOVE);
+
+    if (actor.getRole() != Role::ADMIN) {
+        if ((std::filesystem::exists(sourceStr) && std::filesystem::equivalent(sourceStr, m_logFilePath)) ||
+            (std::filesystem::exists(destStr) && std::filesystem::equivalent(destStr, m_logFilePath))) {
+            m_logger.log("ОТКАЗ: Пользователь '" + actor.getUsername() + "' попытался скопировать файл журнала.");
+            throw std::runtime_error("Доступ к файлу журнала запрещен.");
+        }
+    }
+
+    std::filesystem::path sourcePath(sourceStr);
+    std::filesystem::path destPath(destStr);
+    std::filesystem::path finalDestPath = destPath;
+
+    // Если путь назначения - существующая папка, копируем файл внутрь
+    if (std::filesystem::exists(destPath) && std::filesystem::is_directory(destPath)) {
+        finalDestPath = destPath / sourcePath.filename();
+    }
+
     try {
+        // **КЛЮЧЕВОЙ МОМЕНТ**: Гарантируем, что родительская директория для
+        // конечного файла существует. Если нет — она будет создана.
+        ensureDirectoryExists(finalDestPath); 
+        
         const auto options = std::filesystem::copy_options::overwrite_existing;
-        std::filesystem::copy(sourcePath, destPath, options);
-        m_logger.log("УСПЕХ: Пользователь '" + actor.getUsername() + "' скопировал файл из '" + sourcePath + "' в '" + destPath + "'.");
+        std::filesystem::copy(sourcePath, finalDestPath, options);
+        
+        m_logger.log("УСПЕХ: Пользователь '" + actor.getUsername() + "' скопировал файл из '" + sourceStr + "' в '" + finalDestPath.string() + "'.");
     } catch (const std::filesystem::filesystem_error& e) {
-        m_logger.log("ОШИБКА: Пользователь '" + actor.getUsername() + "' не смог скопировать файл из '" + sourcePath + "'. Причина: " + e.what());
-        throw std::runtime_error("Операция копирования файла не удалась: " + std::string(e.what()));
+        m_logger.log("ОШИБКА: Пользователь '" + actor.getUsername() + "' не смог скопировать файл из '" + sourceStr + "'. Причина: " + e.what());
+        throw std::runtime_error("Операция копирования не удалась. Проверьте путь и права доступа. Системная ошибка: " + std::string(e.what()));
     }
 }
 
-void FileManager::moveFile(const User& actor, const std::string& sourcePath, const std::string& destPath) {
+void FileManager::moveFile(const User& actor, const std::string& sourceStr, const std::string& destStr) {
     PermissionManager::ensure(actor, Permission::COPY_MOVE);
+
+    if (actor.getRole() != Role::ADMIN) {
+       if ((std::filesystem::exists(sourceStr) && std::filesystem::equivalent(sourceStr, m_logFilePath)) ||
+           (std::filesystem::exists(destStr) && std::filesystem::equivalent(destStr, m_logFilePath))) {
+            m_logger.log("ОТКАЗ: Пользователь '" + actor.getUsername() + "' попытался переместить файл журнала.");
+            throw std::runtime_error("Доступ к файлу журнала запрещен.");
+        }
+    }
+
+    std::filesystem::path sourcePath(sourceStr);
+    std::filesystem::path destPath(destStr);
+    std::filesystem::path finalDestPath = destPath;
+    
+    // Если путь назначения - существующая папка, перемещаем файл внутрь
+    if (std::filesystem::exists(destPath) && std::filesystem::is_directory(destPath)) {
+        finalDestPath = destPath / sourcePath.filename();
+    }
+
     try {
-        std::filesystem::rename(sourcePath, destPath);
-        m_logger.log("УСПЕХ: Пользователь '" + actor.getUsername() + "' переместил файл из '" + sourcePath + "' в '" + destPath + "'.");
+        // **КЛЮЧЕВОЙ МОМЕНТ**: Гарантируем, что родительская директория для
+        // конечного файла существует. Если нет — она будет создана.
+        ensureDirectoryExists(finalDestPath);
+        
+        std::filesystem::rename(sourcePath, finalDestPath);
+
+        m_logger.log("УСПЕХ: Пользователь '" + actor.getUsername() + "' переместил файл из '" + sourceStr + "' в '" + finalDestPath.string() + "'.");
     } catch (const std::filesystem::filesystem_error& e) {
-        m_logger.log("ОШИБКА: Пользователь '" + actor.getUsername() + "' не смог переместить файл из '" + sourcePath + "'. Причина: " + e.what());
-        throw std::runtime_error("Операция перемещения файла не удалась: " + std::string(e.what()));
+        m_logger.log("ОШИБКА: Пользователь '" + actor.getUsername() + "' не смог переместить файл из '" + sourceStr + "'. Причина: " + e.what());
+        throw std::runtime_error("Операция перемещения не удалась. Проверьте путь и права доступа. Системная ошибка: " + std::string(e.what()));
     }
 }
 ```
@@ -923,41 +1151,31 @@ void FileManager::moveFile(const User& actor, const std::string& sourcePath, con
 #include "../core/User.h"
 #include <string>
 
-/**
- * @brief Предоставляет полнофункциональные операции с файловой системой.
- * Все операции проверяют права доступа и логируют результат.
- */
 class FileManager {
 public:
-    explicit FileManager(ILogger& logger);
+    explicit FileManager(ILogger& logger, const std::string& logFilePath);
 
     /**
      * @brief Читает содержимое файла и выводит его в консоль.
-     * @throws std::runtime_error, если файл не может быть открыт.
+     * Если файл не существует, создает его.
      */
     void readFile(const User& actor, const std::string& filePath);
 
-    /**
-     * @brief Записывает (перезаписывая) контент в файл.
-     * @param content Содержимое для записи в файл.
-     * @throws std::runtime_error, если файл не может быть открыт для записи.
-     */
     void writeFile(const User& actor, const std::string& filePath, const std::string& content);
 
     /**
-     * @brief Копирует файл из одного места в другое.
-     * @throws std::runtime_error, если операция не удалась.
+     * @brief Копирует файл. Создает директорию назначения, если она не существует.
      */
     void copyFile(const User& actor, const std::string& sourcePath, const std::string& destPath);
     
     /**
-     * @brief Перемещает (или переименовывает) файл.
-     * @throws std::runtime_error, если операция не удалась.
+     * @brief Перемещает файл. Создает директорию назначения, если она не существует.
      */
     void moveFile(const User& actor, const std::string& sourcePath, const std::string& destPath);
     
 private:
     ILogger& m_logger;
+    std::string m_logFilePath;
 };
 ```
 
@@ -1014,12 +1232,12 @@ public:
 #include "UserManager.h"
 #include "PermissionManager.h"
 #include <memory>
+#include <vector>
 
 UserManager::UserManager(IUserRepository& repo, ILogger& logger)
     : m_userRepository(repo), m_logger(logger) {}
 
 void UserManager::createUser(const std::string& username, const std::string& password) {
-    // 1. Валидация
     if (username.length() < 3) {
         throw std::runtime_error("Имя пользователя должно быть не менее 3 символов.");
     }
@@ -1030,11 +1248,9 @@ void UserManager::createUser(const std::string& username, const std::string& pas
         throw std::runtime_error("Пользователь с таким именем уже существует.");
     }
 
-    // 2. Создание и добавление
     auto newUser = std::make_shared<User>(username, password, Role::USER);
     m_userRepository.add(newUser);
 
-    // 3. Логирование
     m_logger.log("Создан новый пользователь: '" + username + "'.");
 }
 
@@ -1045,7 +1261,6 @@ void UserManager::deleteUser(const User& actor, const std::string& usernameToDel
         throw std::runtime_error("Вы не можете удалить свой собственный аккаунт.");
     }
     
-    // Проверяем, существует ли пользователь, перед удалением
     if (!m_userRepository.findByUsername(usernameToDelete)) {
         throw std::runtime_error("Пользователь с именем '" + usernameToDelete + "' не найден.");
     }
@@ -1053,6 +1268,12 @@ void UserManager::deleteUser(const User& actor, const std::string& usernameToDel
     m_userRepository.remove(usernameToDelete);
     
     m_logger.log("Пользователь '" + actor.getUsername() + "' удалил пользователя '" + usernameToDelete + "'.");
+}
+
+std::vector<std::shared_ptr<User>> UserManager::listAllUsers(const User& actor) {
+    // Для получения списка пользователей требуются те же права, что и для удаления
+    PermissionManager::ensure(actor, Permission::DELETE_USER);
+    return m_userRepository.getAll();
 }
 ```
 
@@ -1066,23 +1287,24 @@ void UserManager::deleteUser(const User& actor, const std::string& usernameToDel
 #include "../core/ILogger.h"
 #include "../core/User.h"
 #include <string>
+#include <vector>
+#include <memory>
 
 class UserManager {
 public:
     UserManager(IUserRepository& repo, ILogger& logger);
 
-    /**
-     * @brief Создает нового пользователя с ролью USER.
-     * @throws std::runtime_error если имя пользователя уже занято или данные некорректны.
-     */
     void createUser(const std::string& username, const std::string& password);
 
-    /**
-     * @brief Удаляет пользователя.
-     * @param actor Пользователь, выполняющий действие.
-     * @param usernameToDelete Имя пользователя, которого нужно удалить.
-     */
     void deleteUser(const User& actor, const std::string& usernameToDelete);
+
+    /**
+     * @brief Возвращает список всех пользователей.
+     * @param actor Пользователь, выполняющий действие (для проверки прав).
+     * @return Вектор с указателями на пользователей.
+     * @throws std::runtime_error если у пользователя нет прав на просмотр списка.
+     */
+    std::vector<std::shared_ptr<User>> listAllUsers(const User& actor);
 
 private:
     IUserRepository& m_userRepository;
