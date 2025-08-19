@@ -36,7 +36,6 @@ std::shared_ptr<User> Authenticator::login(const std::string& username, const st
             m_logger.log("!!! ВНИМАНИЕ: Неудачная попытка входа под учетной записью АДМИНИСТРАТОРА '" + username + "'.");
         } else {
             user->incrementFailedAttempts();
-            // Используем настраиваемое значение из m_settings
             const int maxAttempts = m_settings.maxLoginAttempts;
             m_logger.log("Неудачная попытка входа для пользователя '" + username + 
                          "'. Попытка " + std::to_string(user->getFailedLoginAttempts()) + 

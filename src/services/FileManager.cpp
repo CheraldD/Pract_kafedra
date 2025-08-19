@@ -6,10 +6,15 @@
 #include <filesystem>
 #include <iostream>
 
-// Конструктор, который принимает логгер и пути к защищаемым файлам
-FileManager::FileManager(ILogger& logger, const std::string& logFilePath, const std::string& userDbPath) 
-    : m_logger(logger), m_logFilePath(logFilePath), m_userDbPath(userDbPath) {}
+// --- НАЧАЛО ИЗМЕНЕНИЙ ---
+// Обновленный конструктор
+FileManager::FileManager(ILogger& logger, const std::string& logFilePath, const std::string& userDbPath, const std::string& settingsFilePath) 
+    : m_logger(logger), 
+      m_logFilePath(logFilePath), 
+      m_userDbPath(userDbPath),
+      m_settingsFilePath(settingsFilePath) {}
 
+// Анонимный namespace теперь содержит только универсальные функции
 namespace {
     void ensureDirectoryExists(const std::filesystem::path& path) {
         auto parentDir = path.parent_path();
@@ -17,37 +22,44 @@ namespace {
             std::filesystem::create_directories(parentDir);
         }
     }
+} // namespace
 
-    bool isSystemFile(const std::string& path_str, const std::string& logFilePath, const std::string& userDbPath) {
-        if (!std::filesystem::exists(path_str)) {
-            return false;
-        }
-        try {
-            const std::filesystem::path path(path_str);
-            if (std::filesystem::exists(logFilePath) && std::filesystem::equivalent(path, logFilePath)) {
-                return true;
-            }
-            if (std::filesystem::exists(userDbPath) && std::filesystem::equivalent(path, userDbPath)) {
-                return true;
-            }
-        } catch (const std::filesystem::filesystem_error&) {
-            // Ошибка может возникнуть, если файл был удален между exists() и equivalent()
-            return false;
-        }
+// Реализация приватного метода для проверки, является ли файл системным
+bool FileManager::isSystemFile(const std::string& path_str) const {
+    if (!std::filesystem::exists(path_str)) {
         return false;
     }
-
-    void ensureNotSystemFileForUser(const User& actor, const std::string& path, const std::string& logPath, const std::string& dbPath, ILogger& logger) {
-        if (actor.getRole() != Role::ADMIN && isSystemFile(path, logPath, dbPath)) {
-            logger.log("ОТКАЗ: Пользователь '" + actor.getUsername() + "' попытался получить доступ к системному файлу: " + path);
-            throw std::runtime_error("Доступ к системным файлам разрешен только администраторам.");
+    try {
+        const std::filesystem::path path(path_str);
+        if (std::filesystem::exists(m_logFilePath) && std::filesystem::equivalent(path, m_logFilePath)) {
+            return true;
         }
+        if (std::filesystem::exists(m_userDbPath) && std::filesystem::equivalent(path, m_userDbPath)) {
+            return true;
+        }
+        // Добавляем проверку для файла настроек
+        if (std::filesystem::exists(m_settingsFilePath) && std::filesystem::equivalent(path, m_settingsFilePath)) {
+            return true;
+        }
+    } catch (const std::filesystem::filesystem_error&) {
+        return false;
+    }
+    return false;
+}
+
+// Реализация приватного метода для проверки прав пользователя на доступ к системным файлам
+void FileManager::ensureNotSystemFileForUser(const User& actor, const std::string& path) const {
+    if (actor.getRole() != Role::ADMIN && isSystemFile(path)) {
+        m_logger.log("ОТКАЗ: Пользователь '" + actor.getUsername() + "' попытался получить доступ к системному файлу: " + path);
+        throw std::runtime_error("Доступ к системным файлам разрешен только администраторам.");
     }
 }
+// --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
 
 void FileManager::readFile(const User& actor, const std::string& filePath) {
     PermissionManager::ensure(actor, Permission::READ);
-    ensureNotSystemFileForUser(actor, filePath, m_logFilePath, m_userDbPath, m_logger);
+    ensureNotSystemFileForUser(actor, filePath); // Упрощенный вызов
 
     if (!std::filesystem::exists(filePath)) {
         std::ofstream newFile(filePath); 
@@ -73,7 +85,7 @@ void FileManager::readFile(const User& actor, const std::string& filePath) {
 
 void FileManager::writeFile(const User& actor, const std::string& filePath, const std::string& content) {
     PermissionManager::ensure(actor, Permission::WRITE);
-    ensureNotSystemFileForUser(actor, filePath, m_logFilePath, m_userDbPath, m_logger);
+    ensureNotSystemFileForUser(actor, filePath); // Упрощенный вызов
 
     try {
         ensureDirectoryExists(filePath);
@@ -81,38 +93,32 @@ void FileManager::writeFile(const User& actor, const std::string& filePath, cons
          throw std::runtime_error("Не удалось создать директорию для файла. " + std::string(e.what()));
     }
 
-    // --- НАЧАЛО ИЗМЕНЕНИЙ ---
-    // Открываем файл в режиме дозаписи (append)
     std::ofstream file(filePath, std::ios_base::app);
     if (!file.is_open()) {
         throw std::runtime_error("Не удалось открыть файл для записи: " + filePath);
     }
 
-    // Добавляем содержимое и переводим курсор на новую строку
     file << content << std::endl;
-    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
-
     if (!file) {
         throw std::runtime_error("Произошла ошибка во время записи в файл: " + filePath);
     }
     
-    // Обновляем сообщение в логе для ясности
     m_logger.log("Пользователь '" + actor.getUsername() + "' дозаписал в файл '" + filePath + "'.");
 }
 
 void FileManager::copyFile(const User& actor, const std::string& sourceStr, const std::string& destStr) {
     PermissionManager::ensure(actor, Permission::COPY_MOVE);
-    ensureNotSystemFileForUser(actor, sourceStr, m_logFilePath, m_userDbPath, m_logger);
+    ensureNotSystemFileForUser(actor, sourceStr); // Проверка источника
     
-    std::filesystem::path destPath(destStr);
-    if(isSystemFile(destStr, m_logFilePath, m_userDbPath) && actor.getRole() != Role::ADMIN){
+    // Отдельная проверка для файла назначения
+    if(isSystemFile(destStr) && actor.getRole() != Role::ADMIN){
          m_logger.log("ОТКАЗ: Пользователь '" + actor.getUsername() + "' попытался перезаписать системный файл: " + destStr);
          throw std::runtime_error("Доступ к системным файлам разрешен только администраторам.");
     }
 
-
     try {
         std::filesystem::path sourcePath(sourceStr);
+        std::filesystem::path destPath(destStr);
         std::filesystem::path finalDestPath = destPath;
         if (std::filesystem::exists(destPath) && std::filesystem::is_directory(destPath)) {
             finalDestPath = destPath / sourcePath.filename();
@@ -127,16 +133,17 @@ void FileManager::copyFile(const User& actor, const std::string& sourceStr, cons
 
 void FileManager::moveFile(const User& actor, const std::string& sourceStr, const std::string& destStr) {
     PermissionManager::ensure(actor, Permission::COPY_MOVE);
-    ensureNotSystemFileForUser(actor, sourceStr, m_logFilePath, m_userDbPath, m_logger);
+    ensureNotSystemFileForUser(actor, sourceStr); // Проверка источника
 
-    std::filesystem::path destPath(destStr);
-     if(isSystemFile(destStr, m_logFilePath, m_userDbPath) && actor.getRole() != Role::ADMIN){
+    // Отдельная проверка для файла назначения
+     if(isSystemFile(destStr) && actor.getRole() != Role::ADMIN){
          m_logger.log("ОТКАЗ: Пользователь '" + actor.getUsername() + "' попытался перезаписать системный файл: " + destStr);
          throw std::runtime_error("Доступ к системным файлам разрешен только администраторам.");
     }
     
     try {
         std::filesystem::path sourcePath(sourceStr);
+        std::filesystem::path destPath(destStr);
         std::filesystem::path finalDestPath = destPath;
         if (std::filesystem::exists(destPath) && std::filesystem::is_directory(destPath)) {
             finalDestPath = destPath / sourcePath.filename();
