@@ -16,19 +16,21 @@ void FileUserRepository::loadFromFile() {
     std::string line;
     while (std::getline(file, line)) {
         std::stringstream ss(line);
-        std::string username, hash_str, role_str, locked_str, attempts_str;
+        std::string username, hash_str, role_str, locked_str, attempts_str, permissions_str;
         if (std::getline(ss, username, ';') &&
             std::getline(ss, hash_str, ';') &&
             std::getline(ss, role_str, ';') &&
             std::getline(ss, locked_str, ';') &&
-            std::getline(ss, attempts_str, ';')) {
+            std::getline(ss, attempts_str, ';') &&
+            std::getline(ss, permissions_str, ';')) { // Чтение нового поля
             try {
                 auto user = std::make_shared<User>(
                     username, 
                     std::stoull(hash_str), 
                     (std::stoi(role_str) == 1) ? Role::ADMIN : Role::USER,
                     (std::stoi(locked_str) == 1), 
-                    std::stoi(attempts_str)
+                    std::stoi(attempts_str),
+                    static_cast<unsigned int>(std::stoul(permissions_str)) // Преобразование и передача прав
                 );
                 m_usersCache[username] = user;
             } catch (const std::exception& e) {
@@ -49,7 +51,8 @@ void FileUserRepository::saveToFile() {
              << user->getPasswordHash() << ";"
              << static_cast<int>(user->getRole()) << ";"
              << user->isLocked() << ";"
-             << user->getFailedLoginAttempts() << std::endl;
+             << user->getFailedLoginAttempts() << ";"
+             << user->getPermissions() << std::endl; // Запись нового поля
     }
 }
 

@@ -3,15 +3,15 @@
 #include <limits>
 #include <string>
 #include <vector>
-#include <algorithm> // для std::max
-#include <unistd.h>  // Для POSIX-совместимых систем
-#include <termios.h> // Для POSIX-совместимых систем
+#include <algorithm>
+#include <unistd.h>
+#include <termios.h>
 
 #include "../auth/Authenticator.h"
 #include "../auth/AuthExceptions.h"
 #include "../services/UserManager.h"
 #include "../services/FileManager.h"
-#include "../services/PermissionManager.h"
+#include "../services/PermissionManager.h" // Подключаем для enum-ов
 #include "../core/User.h"
 #include "../core/SystemSettings.h"
 
@@ -97,7 +97,6 @@ namespace {
                 std::cout << "╠" << h_line << "╣\n";
             } else {
                 size_t itemPad = maxWidth - count_utf8_chars(item);
-                // Раскрашиваем цифры и точку
                 size_t numEndPos = item.find(". ");
                 if (numEndPos != std::string::npos) {
                      std::cout << "║ " << Color::BRIGHT_YELLOW << item.substr(0, numEndPos + 1) << Color::RESET
@@ -132,6 +131,8 @@ void CLI::run() {
     }
     std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Завершение работы. До свидания!" << std::endl;
 }
+
+// ... handleAuthScreen, handleLogin, handleRegistration, showMainMenu, handleSystemSettings (без изменений)
 
 void CLI::handleAuthScreen() {
     displayMenu("Система Управления Доступом", {
@@ -259,7 +260,6 @@ void CLI::handleSystemSettings() {
     }
 }
 
-
 void CLI::handleUserActions() {
     int choice = -1;
     while (m_currentUser && m_shouldRun) {
@@ -357,7 +357,48 @@ void CLI::handleUserActions() {
                     std::cout << Color::CYAN << "-> " << Color::RESET << "Введите пароль (мин. 4 символа): " << std::flush;
                     newPassword = getMaskedPassword();
 
-                    m_userManager.createUserByAdmin(*m_currentUser, newUsername, newPassword);
+                    // --- НАЧАЛО ИЗМЕНЕНИЙ ---
+                    std::cout << Color::BLUE << "\n--- Выбор прав для пользователя ---" << Color::RESET << std::endl;
+                    std::cout << "1. Чтение и запись" << std::endl;
+                    std::cout << "2. Копирование и перемещение" << std::endl;
+                    std::cout << "3. Все права (чтение, запись, копирование, перемещение)" << std::endl;
+                    std::cout << Color::BRIGHT_YELLOW << "> " << Color::RESET << std::flush;
+                    
+                    int permChoice;
+                    std::cin >> permChoice;
+                    
+                    if (std::cin.fail()) {
+                        std::cout << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Некорректный ввод." << std::endl;
+                        std::cin.clear();
+                        clearInputBuffer();
+                        break;
+                    }
+                    clearInputBuffer();
+                    
+                    unsigned int permissions = 0;
+                    switch (permChoice) {
+                        case 1:
+                            permissions = static_cast<unsigned int>(Permission::READ) | static_cast<unsigned int>(Permission::WRITE);
+                            break;
+                        case 2:
+                            permissions = static_cast<unsigned int>(Permission::COPY_MOVE);
+                            break;
+                        case 3:
+                            permissions = static_cast<unsigned int>(Permission::READ) | static_cast<unsigned int>(Permission::WRITE) | static_cast<unsigned int>(Permission::COPY_MOVE);
+                            break;
+                        default:
+                            std::cout << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Неверный выбор. Операция отменена." << std::endl;
+                            break;
+                    }
+
+                    if (permissions == 0) {
+                        break; 
+                    }
+                    
+                    // Вызов обновленного метода с передачей маски прав
+                    m_userManager.createUserByAdmin(*m_currentUser, newUsername, newPassword, permissions);
+                    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
                     std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Пользователь '" << newUsername << "' успешно создан." << std::endl;
                     break;
                 }

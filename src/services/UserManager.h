@@ -12,16 +12,11 @@ public:
 
     void createUser(const std::string& username, const std::string& password);
 
-    void createUserByAdmin(const User& actor, const std::string& username, const std::string& password);
+    // Добавлен параметр permissions для указания прав при создании
+    void createUserByAdmin(const User& actor, const std::string& username, const std::string& password, unsigned int permissions);
 
     void deleteUser(const User& actor, const std::string& usernameToDelete);
 
-    /**
-     * @brief Возвращает список всех пользователей.
-     * @param actor Пользователь, выполняющий действие (для проверки прав).
-     * @return Вектор с указателями на пользователей.
-     * @throws std::runtime_error если у пользователя нет прав на просмотр списка.
-     */
     std::vector<std::shared_ptr<User>> listAllUsers(const User& actor);
 
 private:
