@@ -6,15 +6,12 @@
 #include <filesystem>
 #include <iostream>
 
-// --- НАЧАЛО ИЗМЕНЕНИЙ ---
-// Обновленный конструктор
 FileManager::FileManager(ILogger& logger, const std::string& logFilePath, const std::string& userDbPath, const std::string& settingsFilePath) 
     : m_logger(logger), 
       m_logFilePath(logFilePath), 
       m_userDbPath(userDbPath),
       m_settingsFilePath(settingsFilePath) {}
 
-// Анонимный namespace теперь содержит только универсальные функции
 namespace {
     void ensureDirectoryExists(const std::filesystem::path& path) {
         auto parentDir = path.parent_path();
@@ -22,9 +19,8 @@ namespace {
             std::filesystem::create_directories(parentDir);
         }
     }
-} // namespace
+} 
 
-// Реализация приватного метода для проверки, является ли файл системным
 bool FileManager::isSystemFile(const std::string& path_str) const {
     if (!std::filesystem::exists(path_str)) {
         return false;
@@ -37,7 +33,6 @@ bool FileManager::isSystemFile(const std::string& path_str) const {
         if (std::filesystem::exists(m_userDbPath) && std::filesystem::equivalent(path, m_userDbPath)) {
             return true;
         }
-        // Добавляем проверку для файла настроек
         if (std::filesystem::exists(m_settingsFilePath) && std::filesystem::equivalent(path, m_settingsFilePath)) {
             return true;
         }
@@ -47,19 +42,16 @@ bool FileManager::isSystemFile(const std::string& path_str) const {
     return false;
 }
 
-// Реализация приватного метода для проверки прав пользователя на доступ к системным файлам
 void FileManager::ensureNotSystemFileForUser(const User& actor, const std::string& path) const {
     if (actor.getRole() != Role::ADMIN && isSystemFile(path)) {
         m_logger.log("ОТКАЗ: Пользователь '" + actor.getUsername() + "' попытался получить доступ к системному файлу: " + path);
         throw std::runtime_error("Доступ к системным файлам разрешен только администраторам.");
     }
 }
-// --- КОНЕЦ ИЗМЕНЕНИЙ ---
-
 
 void FileManager::readFile(const User& actor, const std::string& filePath) {
     PermissionManager::ensure(actor, Permission::READ);
-    ensureNotSystemFileForUser(actor, filePath); // Упрощенный вызов
+    ensureNotSystemFileForUser(actor, filePath); 
 
     if (!std::filesystem::exists(filePath)) {
         std::ofstream newFile(filePath); 
@@ -85,7 +77,7 @@ void FileManager::readFile(const User& actor, const std::string& filePath) {
 
 void FileManager::writeFile(const User& actor, const std::string& filePath, const std::string& content) {
     PermissionManager::ensure(actor, Permission::WRITE);
-    ensureNotSystemFileForUser(actor, filePath); // Упрощенный вызов
+    ensureNotSystemFileForUser(actor, filePath); 
 
     try {
         ensureDirectoryExists(filePath);
@@ -108,9 +100,8 @@ void FileManager::writeFile(const User& actor, const std::string& filePath, cons
 
 void FileManager::copyFile(const User& actor, const std::string& sourceStr, const std::string& destStr) {
     PermissionManager::ensure(actor, Permission::COPY_MOVE);
-    ensureNotSystemFileForUser(actor, sourceStr); // Проверка источника
+    ensureNotSystemFileForUser(actor, sourceStr); 
     
-    // Отдельная проверка для файла назначения
     if(isSystemFile(destStr) && actor.getRole() != Role::ADMIN){
          m_logger.log("ОТКАЗ: Пользователь '" + actor.getUsername() + "' попытался перезаписать системный файл: " + destStr);
          throw std::runtime_error("Доступ к системным файлам разрешен только администраторам.");
@@ -133,9 +124,8 @@ void FileManager::copyFile(const User& actor, const std::string& sourceStr, cons
 
 void FileManager::moveFile(const User& actor, const std::string& sourceStr, const std::string& destStr) {
     PermissionManager::ensure(actor, Permission::COPY_MOVE);
-    ensureNotSystemFileForUser(actor, sourceStr); // Проверка источника
+    ensureNotSystemFileForUser(actor, sourceStr); 
 
-    // Отдельная проверка для файла назначения
      if(isSystemFile(destStr) && actor.getRole() != Role::ADMIN){
          m_logger.log("ОТКАЗ: Пользователь '" + actor.getUsername() + "' попытался перезаписать системный файл: " + destStr);
          throw std::runtime_error("Доступ к системным файлам разрешен только администраторам.");

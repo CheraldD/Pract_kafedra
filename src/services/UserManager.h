@@ -12,7 +12,6 @@ public:
 
     void createUser(const std::string& username, const std::string& password);
 
-    // Добавлен параметр permissions для указания прав при создании
     void createUserByAdmin(const User& actor, const std::string& username, const std::string& password, unsigned int permissions);
 
     void deleteUser(const User& actor, const std::string& usernameToDelete);

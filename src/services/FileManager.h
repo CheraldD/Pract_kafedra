@@ -5,10 +5,8 @@
 
 class FileManager {
 public:
-    // --- НАЧАЛО ИЗМЕНЕНИЙ ---
-    // Конструктор теперь принимает путь к файлу настроек
+   
     explicit FileManager(ILogger& logger, const std::string& logFilePath, const std::string& userDbPath, const std::string& settingsFilePath);
-    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
     void readFile(const User& actor, const std::string& filePath);
     void writeFile(const User& actor, const std::string& filePath, const std::string& content);
@@ -19,11 +17,11 @@ private:
     ILogger& m_logger;
     std::string m_logFilePath;
     std::string m_userDbPath;
-    // --- НАЧАЛО ИЗМЕНЕНИЙ ---
-    std::string m_settingsFilePath; // Путь к файлу настроек
+   
+    std::string m_settingsFilePath; 
     
-    // Приватные методы для проверки доступа
+    
     bool isSystemFile(const std::string& path_str) const;
     void ensureNotSystemFileForUser(const User& actor, const std::string& path) const;
-    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+   
 };

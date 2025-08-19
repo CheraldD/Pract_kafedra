@@ -11,7 +11,6 @@ public:
     
     virtual std::shared_ptr<User> findByUsername(const std::string& username) = 0;
 
-    // ОБЯЗАТЕЛЬНОЕ ДОБАВЛЕНИЕ: объявляем метод в интерфейсе
     virtual std::vector<std::shared_ptr<User>> getAll() = 0;
 
     virtual void add(std::shared_ptr<User> user) = 0;

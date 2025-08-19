@@ -17,14 +17,13 @@ void UserManager::createUser(const std::string& username, const std::string& pas
         throw std::runtime_error("Пользователь с таким именем уже существует.");
     }
 
-    // Создаем пользователя с правами по умолчанию, заданными в конструкторе User
     auto newUser = std::make_shared<User>(username, password, Role::USER);
     m_userRepository.add(newUser);
 
     m_logger.log("Создан новый пользователь: '" + username + "'.");
 }
 
-// Новая реализация с параметром permissions
+
 void UserManager::createUserByAdmin(const User& actor, const std::string& username, const std::string& password, unsigned int permissions) {
     PermissionManager::ensure(actor, Permission::CREATE_USER);
 
@@ -38,7 +37,6 @@ void UserManager::createUserByAdmin(const User& actor, const std::string& userna
         throw std::runtime_error("Пользователь с таким именем уже существует.");
     }
 
-    // Передаем выбранную администратором маску прав в конструктор
     auto newUser = std::make_shared<User>(username, password, Role::USER, permissions);
     m_userRepository.add(newUser);
 

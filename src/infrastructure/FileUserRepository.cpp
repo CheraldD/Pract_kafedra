@@ -22,7 +22,7 @@ void FileUserRepository::loadFromFile() {
             std::getline(ss, role_str, ';') &&
             std::getline(ss, locked_str, ';') &&
             std::getline(ss, attempts_str, ';') &&
-            std::getline(ss, permissions_str, ';')) { // Чтение нового поля
+            std::getline(ss, permissions_str, ';')) { 
             try {
                 auto user = std::make_shared<User>(
                     username, 
@@ -30,7 +30,7 @@ void FileUserRepository::loadFromFile() {
                     (std::stoi(role_str) == 1) ? Role::ADMIN : Role::USER,
                     (std::stoi(locked_str) == 1), 
                     std::stoi(attempts_str),
-                    static_cast<unsigned int>(std::stoul(permissions_str)) // Преобразование и передача прав
+                    static_cast<unsigned int>(std::stoul(permissions_str)) 
                 );
                 m_usersCache[username] = user;
             } catch (const std::exception& e) {
@@ -52,7 +52,7 @@ void FileUserRepository::saveToFile() {
              << static_cast<int>(user->getRole()) << ";"
              << user->isLocked() << ";"
              << user->getFailedLoginAttempts() << ";"
-             << user->getPermissions() << std::endl; // Запись нового поля
+             << user->getPermissions() << std::endl; 
     }
 }
 

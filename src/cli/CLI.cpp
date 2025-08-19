@@ -11,12 +11,11 @@
 #include "../auth/AuthExceptions.h"
 #include "../services/UserManager.h"
 #include "../services/FileManager.h"
-#include "../services/PermissionManager.h" // Подключаем для enum-ов
+#include "../services/PermissionManager.h" 
 #include "../core/User.h"
 #include "../core/SystemSettings.h"
 
 namespace {
-    // --- Цветовые ANSI-коды для терминала ---
     namespace Color {
         const std::string RESET = "\033[0m";
         const std::string BOLD = "\033[1m";
@@ -49,7 +48,7 @@ namespace {
         tcsetattr(STDIN_FILENO, TCSANOW, &newt);
 
         while (read(STDIN_FILENO, &ch, 1) > 0 && ch != '\n') {
-            if (ch == 127 || ch == 8) { // Backspace
+            if (ch == 127 || ch == 8) { 
                 if (!password.empty()) {
                     password.pop_back();
                     std::cout << "\b \b" << std::flush;
@@ -110,7 +109,7 @@ namespace {
         std::cout << "╚" << h_line << "╝" << Color::RESET << std::endl;
     }
 
-} // namespace
+} 
 
 CLI::CLI(Authenticator& auth, UserManager& userManager, FileManager& fileManager, SystemSettings& settings)
     : m_auth(auth),
@@ -250,7 +249,7 @@ void CLI::handleSystemSettings() {
             return;
         }
         m_settings.maxLoginAttempts = newMaxAttempts;
-        m_settings.save(); // Сохраняем новое значение в файл
+        m_settings.save();
         
         std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Максимальное количество попыток входа изменено на " 
                   << Color::BOLD << m_settings.maxLoginAttempts << Color::RESET << "." << std::endl;
@@ -282,7 +281,7 @@ void CLI::handleUserActions() {
 
         try {
             switch (choice) {
-                case 1: { // Прочитать файл
+                case 1: { 
                     std::cout << Color::CYAN << "-> " << Color::RESET << "Введите путь к файлу для чтения (или '" << CANCEL_COMMAND << "'): " << std::flush;
                     std::string path;
                     std::getline(std::cin, path);
@@ -290,7 +289,7 @@ void CLI::handleUserActions() {
                     m_fileManager.readFile(*m_currentUser, path);
                     break;
                 }
-                case 2: { // Записать в файл
+                case 2: { 
                     std::cout << Color::CYAN << "-> " << Color::RESET << "Введите путь к файлу для записи (или '" << CANCEL_COMMAND << "'): " << std::flush;
                     std::string path;
                     std::getline(std::cin, path);
@@ -303,7 +302,7 @@ void CLI::handleUserActions() {
                     std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Данные успешно добавлены в файл '" << path << "'." << std::endl;
                     break;
                 }
-                case 3: case 4: { // Копировать или переместить
+                case 3: case 4: { 
                      std::cout << Color::CYAN << "-> " << Color::RESET << "Введите путь к исходному файлу (или '" << CANCEL_COMMAND << "'): " << std::flush;
                     std::string source;
                     std::getline(std::cin, source);
@@ -323,7 +322,7 @@ void CLI::handleUserActions() {
                     }
                     break;
                 }
-                case 5: { // Удалить пользователя (Админ)
+                case 5: { 
                     if (!PermissionManager::has(*m_currentUser, Permission::DELETE_USER)) {
                          std::cout << "\n" << Color::RED << "[✗] " << Color::RESET << "Неизвестная команда." << std::endl; break;
                     }
@@ -346,7 +345,7 @@ void CLI::handleUserActions() {
                     std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Пользователь '" << usernameToDelete << "' успешно удален." << std::endl;
                     break;
                 }
-                case 6: { // Создать пользователя (Админ)
+                case 6: { 
                     if (!PermissionManager::has(*m_currentUser, Permission::CREATE_USER)) {
                         std::cout << "\n" << Color::RED << "[✗] " << Color::RESET << "Неизвестная команда." << std::endl; break;
                     }
@@ -402,18 +401,18 @@ void CLI::handleUserActions() {
                     std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Пользователь '" << newUsername << "' успешно создан." << std::endl;
                     break;
                 }
-                case 7: { // Настройки системы (Админ)
+                case 7: { 
                      if (m_currentUser->getRole() != Role::ADMIN) {
                         std::cout << "\n" << Color::RED << "[✗] " << Color::RESET << "Неизвестная команда." << std::endl; break;
                     }
                     handleSystemSettings();
                     break;
                 }
-                case 9: // Выход из аккаунта
+                case 9: 
                     m_currentUser = nullptr;
                     std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Вы вышли из системы." << std::endl;
                     break;
-                case 0: // Выход из приложения
+                case 0: 
                     m_shouldRun = false;
                     m_currentUser = nullptr;
                     break;

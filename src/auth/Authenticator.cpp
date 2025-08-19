@@ -1,14 +1,12 @@
 #include "Authenticator.h"
 #include "../core/User.h"
-#include "../core/SystemSettings.h" // Подключаем определение SystemSettings
+#include "../core/SystemSettings.h" 
 #include "../utils/Hash.h"
 #include "AuthExceptions.h"
-
-// Конструктор теперь принимает SystemSettings по ссылке
 Authenticator::Authenticator(IUserRepository& repo, ILogger& logger, SystemSettings& settings)
     : m_userRepository(repo),
       m_logger(logger),
-      m_settings(settings) {} // Сохраняем ссылку
+      m_settings(settings) {} 
 
 std::shared_ptr<User> Authenticator::login(const std::string& username, const std::string& password) noexcept(false) {
     auto user = m_userRepository.findByUsername(username);

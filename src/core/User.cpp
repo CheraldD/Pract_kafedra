@@ -1,6 +1,6 @@
 #include "User.h"
 #include "../utils/Hash.h" 
-#include "../services/PermissionManager.h" // Для доступа к enum Permission
+#include "../services/PermissionManager.h" 
 
 User::User(const std::string& username, const std::string& rawPassword, Role role, unsigned int permissions)
     : m_username(username),
@@ -10,17 +10,13 @@ User::User(const std::string& username, const std::string& rawPassword, Role rol
       m_failedLoginAttempts(0) 
 {
     if (role == Role::ADMIN) {
-        // Администратор всегда имеет все права, но для полноты установим маску
         m_permissions = static_cast<unsigned int>(Permission::READ) | 
                         static_cast<unsigned int>(Permission::WRITE) |
                         static_cast<unsigned int>(Permission::COPY_MOVE);
     } else {
-        // Если права не указаны (permissions == 0), это саморегистрация. 
-        // Даем права по умолчанию.
         if (permissions == 0) {
             m_permissions = static_cast<unsigned int>(Permission::READ) | static_cast<unsigned int>(Permission::WRITE);
         } else {
-            // Иначе, это создание пользователя администратором с заданными правами.
             m_permissions = permissions;
         }
     }
@@ -32,7 +28,7 @@ User::User(const std::string& username, size_t passwordHash, Role role, bool isL
       m_role(role),
       m_isLocked(isLocked),
       m_failedLoginAttempts(failedLoginAttempts),
-      m_permissions(permissions) {} // Инициализация нового поля
+      m_permissions(permissions) {}
 
 const std::string& User::getUsername() const {
     return m_username;

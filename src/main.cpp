@@ -29,11 +29,8 @@ int main() {
         
         Authenticator auth(userRepo, logger, settings);
         UserManager userManager(userRepo, logger);
-        
-        // --- НАЧАЛО ИЗМЕНЕНИЙ ---
-        // Передаем путь к файлу настроек в FileManager
         FileManager fileManager(logger, LOG_FILE_PATH, USER_DATA_PATH, SETTINGS_FILE_PATH);
-        // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+       
         
         CLI cli(auth, userManager, fileManager, settings);
         cli.run();
