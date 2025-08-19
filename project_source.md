@@ -1,5 +1,5 @@
 # Полный Исходный Код Проекта Системы Управления Доступом
-_Сгенерировано: 2025-08-19 20:01:24_
+_Сгенерировано: 2025-08-19 20:42:16_
 
 ## Содержание
 - [`src/auth/AuthExceptions.h`](#srcauthAuthExceptionsh)
@@ -305,8 +305,6 @@ void CLI::run() {
     std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Завершение работы. До свидания!" << std::endl;
 }
 
-// ... handleAuthScreen, handleLogin, handleRegistration, showMainMenu, handleSystemSettings (без изменений)
-
 void CLI::handleAuthScreen() {
     displayMenu("Система Управления Доступом", {
         "1. Вход",
@@ -394,6 +392,7 @@ void CLI::showMainMenu() const {
         "4. Переместить файл"
     };
     if (m_currentUser->getRole() == Role::ADMIN) {
+        items.push_back(MENU_SEPARATOR);
         items.push_back("5. Удалить пользователя (Админ)");
         items.push_back("6. Создать пользователя (Админ)");
         items.push_back("7. Настройки системы (Админ)");
@@ -424,14 +423,18 @@ void CLI::handleSystemSettings() {
             return;
         }
         m_settings.maxLoginAttempts = newMaxAttempts;
+        m_settings.save(); // Сохраняем новое значение в файл
+        
         std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Максимальное количество попыток входа изменено на " 
                   << Color::BOLD << m_settings.maxLoginAttempts << Color::RESET << "." << std::endl;
+
     } catch (const std::invalid_argument&) {
         std::cout << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Некорректный ввод. Пожалуйста, введите целое число." << std::endl;
     } catch (const std::out_of_range&) {
         std::cout << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Введенное число слишком велико." << std::endl;
     }
 }
+
 
 void CLI::handleUserActions() {
     int choice = -1;
@@ -452,7 +455,7 @@ void CLI::handleUserActions() {
 
         try {
             switch (choice) {
-                case 1: {
+                case 1: { // Прочитать файл
                     std::cout << Color::CYAN << "-> " << Color::RESET << "Введите путь к файлу для чтения (или '" << CANCEL_COMMAND << "'): " << std::flush;
                     std::string path;
                     std::getline(std::cin, path);
@@ -460,20 +463,20 @@ void CLI::handleUserActions() {
                     m_fileManager.readFile(*m_currentUser, path);
                     break;
                 }
-                case 2: {
+                case 2: { // Записать в файл
                     std::cout << Color::CYAN << "-> " << Color::RESET << "Введите путь к файлу для записи (или '" << CANCEL_COMMAND << "'): " << std::flush;
                     std::string path;
                     std::getline(std::cin, path);
                     if (path == CANCEL_COMMAND || path.empty()) break;
 
-                    std::cout << Color::CYAN << "-> " << Color::RESET << "Введите содержимое (одной строкой): " << std::flush;
+                    std::cout << Color::CYAN << "-> " << Color::RESET << "Введите содержимое для дозаписи (одной строкой): " << std::flush;
                     std::string content;
                     std::getline(std::cin, content);
                     m_fileManager.writeFile(*m_currentUser, path, content);
-                    std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Запись в файл '" << path << "' успешно завершена." << std::endl;
+                    std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Данные успешно добавлены в файл '" << path << "'." << std::endl;
                     break;
                 }
-                case 3: case 4: {
+                case 3: case 4: { // Копировать или переместить
                      std::cout << Color::CYAN << "-> " << Color::RESET << "Введите путь к исходному файлу (или '" << CANCEL_COMMAND << "'): " << std::flush;
                     std::string source;
                     std::getline(std::cin, source);
@@ -493,7 +496,7 @@ void CLI::handleUserActions() {
                     }
                     break;
                 }
-                case 5: {
+                case 5: { // Удалить пользователя (Админ)
                     if (!PermissionManager::has(*m_currentUser, Permission::DELETE_USER)) {
                          std::cout << "\n" << Color::RED << "[✗] " << Color::RESET << "Неизвестная команда." << std::endl; break;
                     }
@@ -516,7 +519,7 @@ void CLI::handleUserActions() {
                     std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Пользователь '" << usernameToDelete << "' успешно удален." << std::endl;
                     break;
                 }
-                case 6: {
+                case 6: { // Создать пользователя (Админ)
                     if (!PermissionManager::has(*m_currentUser, Permission::CREATE_USER)) {
                         std::cout << "\n" << Color::RED << "[✗] " << Color::RESET << "Неизвестная команда." << std::endl; break;
                     }
@@ -530,7 +533,6 @@ void CLI::handleUserActions() {
                     std::cout << Color::CYAN << "-> " << Color::RESET << "Введите пароль (мин. 4 символа): " << std::flush;
                     newPassword = getMaskedPassword();
 
-                    // --- НАЧАЛО ИЗМЕНЕНИЙ ---
                     std::cout << Color::BLUE << "\n--- Выбор прав для пользователя ---" << Color::RESET << std::endl;
                     std::cout << "1. Чтение и запись" << std::endl;
                     std::cout << "2. Копирование и перемещение" << std::endl;
@@ -548,7 +550,7 @@ void CLI::handleUserActions() {
                     }
                     clearInputBuffer();
                     
-                    unsigned int permissions = 0;
+                    unsigned int permissions = static_cast<unsigned int>(Permission::NONE);
                     switch (permChoice) {
                         case 1:
                             permissions = static_cast<unsigned int>(Permission::READ) | static_cast<unsigned int>(Permission::WRITE);
@@ -564,29 +566,27 @@ void CLI::handleUserActions() {
                             break;
                     }
 
-                    if (permissions == 0) {
+                    if (permissions == static_cast<unsigned int>(Permission::NONE)) {
                         break; 
                     }
                     
-                    // Вызов обновленного метода с передачей маски прав
                     m_userManager.createUserByAdmin(*m_currentUser, newUsername, newPassword, permissions);
-                    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
                     std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Пользователь '" << newUsername << "' успешно создан." << std::endl;
                     break;
                 }
-                case 7: {
+                case 7: { // Настройки системы (Админ)
                      if (m_currentUser->getRole() != Role::ADMIN) {
                         std::cout << "\n" << Color::RED << "[✗] " << Color::RESET << "Неизвестная команда." << std::endl; break;
                     }
                     handleSystemSettings();
                     break;
                 }
-                case 9:
+                case 9: // Выход из аккаунта
                     m_currentUser = nullptr;
                     std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Вы вышли из системы." << std::endl;
                     break;
-                case 0:
+                case 0: // Выход из приложения
                     m_shouldRun = false;
                     m_currentUser = nullptr;
                     break;
@@ -717,6 +717,9 @@ enum class Role {
 
 ```cpp
 #pragma once
+#include <string>
+#include <fstream>
+#include <iostream>
 
 /**
  * @brief Структура для хранения глобальных настроек системы.
@@ -730,6 +733,44 @@ struct SystemSettings {
      * Значение по умолчанию: 3.
      */
     int maxLoginAttempts = 3;
+
+private:
+    std::string m_configFilePath; // Путь к файлу для сохранения настроек
+
+public:
+    /**
+     * @brief Загружает настройки из файла. Если файл не существует или пуст,
+     * используются значения по умолчанию.
+     * @param path Путь к файлу настроек.
+     */
+    void load(const std::string& path) {
+        m_configFilePath = path;
+        std::ifstream file(m_configFilePath);
+        if (file.is_open() && (file >> maxLoginAttempts)) {
+            // Значение успешно прочитано
+            if (maxLoginAttempts <= 0) {
+                maxLoginAttempts = 3; // Восстанавливаем безопасное значение по умолчанию
+            }
+        }
+        // Если файл не открылся или пуст, просто используем значение по умолчанию.
+    }
+
+    /**
+     * @brief Сохраняет текущие настройки в файл.
+     */
+    void save() const {
+        if (m_configFilePath.empty()) {
+            return; // Некуда сохранять, если путь не был задан
+        }
+        // Открываем файл для перезаписи (trunc)
+        std::ofstream file(m_configFilePath, std::ios_base::trunc);
+        if (file.is_open()) {
+            file << maxLoginAttempts;
+        } else {
+            // В случае ошибки выводим предупреждение. Логгер здесь недоступен.
+            std::cerr << "Предупреждение: Не удалось сохранить файл настроек: " << m_configFilePath << std::endl;
+        }
+    }
 };
 ```
 
@@ -1139,14 +1180,21 @@ private:
 #include "services/UserManager.h"
 #include "services/FileManager.h"
 #include "cli/CLI.h"
-#include "core/SystemSettings.h" // Подключаем новый заголовок
+#include "core/SystemSettings.h" 
 
 int main() {
     const std::string LOG_FILE_PATH = "app_activity.log";
     const std::string USER_DATA_PATH = "users.data";
+    // --- НАЧАЛО ИЗМЕНЕНИЙ ---
+    const std::string SETTINGS_FILE_PATH = "settings.conf";
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
     
     try {
+        // --- НАЧАЛО ИЗМЕНЕНИЙ ---
         SystemSettings settings;
+        // Загружаем настройки из файла при запуске
+        settings.load(SETTINGS_FILE_PATH);
+        // --- КОНЕЦ ИЗМЕНЕНИЙ ---
 
         FileLogger logger(LOG_FILE_PATH);
         FileUserRepository userRepo(USER_DATA_PATH);
@@ -1260,17 +1308,23 @@ void FileManager::writeFile(const User& actor, const std::string& filePath, cons
          throw std::runtime_error("Не удалось создать директорию для файла. " + std::string(e.what()));
     }
 
-    std::ofstream file(filePath);
+    // --- НАЧАЛО ИЗМЕНЕНИЙ ---
+    // Открываем файл в режиме дозаписи (append)
+    std::ofstream file(filePath, std::ios_base::app);
     if (!file.is_open()) {
         throw std::runtime_error("Не удалось открыть файл для записи: " + filePath);
     }
 
-    file << content;
+    // Добавляем содержимое и переводим курсор на новую строку
+    file << content << std::endl;
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
     if (!file) {
         throw std::runtime_error("Произошла ошибка во время записи в файл: " + filePath);
     }
     
-    m_logger.log("Пользователь '" + actor.getUsername() + "' записал в файл '" + filePath + "'.");
+    // Обновляем сообщение в логе для ясности
+    m_logger.log("Пользователь '" + actor.getUsername() + "' дозаписал в файл '" + filePath + "'.");
 }
 
 void FileManager::copyFile(const User& actor, const std::string& sourceStr, const std::string& destStr) {
