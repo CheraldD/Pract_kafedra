@@ -1,5 +1,5 @@
 # Полный Исходный Код Проекта Системы Управления Доступом
-_Сгенерировано: 2025-08-18 23:55:20_
+_Сгенерировано: 2025-08-19 16:58:44_
 
 ## Содержание
 - [`src/auth/AuthExceptions.h`](#srcauthAuthExceptionsh)
@@ -10,6 +10,7 @@ _Сгенерировано: 2025-08-18 23:55:20_
 - [`src/core/ILogger.h`](#srccoreILoggerh)
 - [`src/core/IUserRepository.h`](#srccoreIUserRepositoryh)
 - [`src/core/Role.h`](#srccoreRoleh)
+- [`src/core/SystemSettings.h`](#srccoreSystemSettingsh)
 - [`src/core/User.cpp`](#srccoreUsercpp)
 - [`src/core/User.h`](#srccoreUserh)
 - [`src/infrastructure/FileLogger.cpp`](#srcinfrastructureFileLoggercpp)
@@ -73,13 +74,15 @@ public:
 ```cpp
 #include "Authenticator.h"
 #include "../core/User.h"
+#include "../core/SystemSettings.h" // Подключаем определение SystemSettings
 #include "../utils/Hash.h"
 #include "AuthExceptions.h"
 
-Authenticator::Authenticator(IUserRepository& repo, ILogger& logger, int maxAttempts)
+// Конструктор теперь принимает SystemSettings по ссылке
+Authenticator::Authenticator(IUserRepository& repo, ILogger& logger, SystemSettings& settings)
     : m_userRepository(repo),
       m_logger(logger),
-      m_maxFailedAttempts(maxAttempts) {}
+      m_settings(settings) {} // Сохраняем ссылку
 
 std::shared_ptr<User> Authenticator::login(const std::string& username, const std::string& password) noexcept(false) {
     auto user = m_userRepository.findByUsername(username);
@@ -94,7 +97,6 @@ std::shared_ptr<User> Authenticator::login(const std::string& username, const st
         throw AccountLockedException("Этот аккаунт заблокирован. Обратитесь к администратору.");
     }
 
-    // Если пароль верный
     if (user->getPasswordHash() == hashPassword(password)) {
         m_logger.log("Пользователь '" + username + "' успешно вошел в систему.");
         if (user->getFailedLoginAttempts() > 0) {
@@ -103,20 +105,18 @@ std::shared_ptr<User> Authenticator::login(const std::string& username, const st
         }
         return user;
     } 
-    // Если пароль неверный
     else {
-        // ИЗМЕНЕНИЕ: Добавляем проверку роли перед блокировкой
         if (user->getRole() == Role::ADMIN) {
-            // Если это админ, просто логируем ошибку, но не блокируем
             m_logger.log("!!! ВНИМАНИЕ: Неудачная попытка входа под учетной записью АДМИНИСТРАТОРА '" + username + "'.");
         } else {
-            // Для обычных пользователей оставляем старую логику
             user->incrementFailedAttempts();
+            // Используем настраиваемое значение из m_settings
+            const int maxAttempts = m_settings.maxLoginAttempts;
             m_logger.log("Неудачная попытка входа для пользователя '" + username + 
                          "'. Попытка " + std::to_string(user->getFailedLoginAttempts()) + 
-                         " из " + std::to_string(m_maxFailedAttempts) + ".");
+                         " из " + std::to_string(maxAttempts) + ".");
 
-            if (user->getFailedLoginAttempts() >= m_maxFailedAttempts) {
+            if (user->getFailedLoginAttempts() >= maxAttempts) {
                 user->lock();
                 m_logger.log("Аккаунт пользователя '" + username + "' заблокирован из-за большого количества неудачных попыток входа.");
             }
@@ -138,14 +138,17 @@ std::shared_ptr<User> Authenticator::login(const std::string& username, const st
 #include "../core/ILogger.h"
 #include <memory>
 
-class User; // Forward declaration
+// Forward declaration для уменьшения зависимостей в заголовочных файлах
+class User; 
+struct SystemSettings;
 
 /**
  * @brief Отвечает за логику входа пользователя в систему.
  */
 class Authenticator {
 public:
-    Authenticator(IUserRepository& repo, ILogger& logger, int maxAttempts = 3);
+    // Изменен конструктор для приема объекта настроек по ссылке
+    Authenticator(IUserRepository& repo, ILogger& logger, SystemSettings& settings);
 
     /**
      * @brief Выполняет попытку входа пользователя в систему.
@@ -158,7 +161,8 @@ public:
 private:
     IUserRepository& m_userRepository;
     ILogger& m_logger;
-    const int m_maxFailedAttempts;
+    // Храним ссылку на настройки, чтобы всегда иметь актуальное значение
+    SystemSettings& m_settings;
 };
 ```
 
@@ -172,14 +176,9 @@ private:
 #include <limits>
 #include <string>
 #include <vector>
-
-// Платформо-зависимые заголовочные файлы
-#ifdef _WIN32
-#include <conio.h>
-#else
-#include <termios.h>
-#include <unistd.h>
-#endif
+#include <algorithm> // для std::max
+#include <unistd.h>  // Для POSIX-совместимых систем
+#include <termios.h> // Для POSIX-совместимых систем
 
 #include "../auth/Authenticator.h"
 #include "../auth/AuthExceptions.h"
@@ -187,9 +186,26 @@ private:
 #include "../services/FileManager.h"
 #include "../services/PermissionManager.h"
 #include "../core/User.h"
+#include "../core/SystemSettings.h"
 
 namespace {
+    // --- Цветовые ANSI-коды для терминала ---
+    namespace Color {
+        const std::string RESET = "\033[0m";
+        const std::string BOLD = "\033[1m";
+        const std::string RED = "\033[31m";
+        const std::string GREEN = "\033[32m";
+        const std::string YELLOW = "\033[33m";
+        const std::string BLUE = "\033[34m";
+        const std::string MAGENTA = "\033[35m";
+        const std::string CYAN = "\033[36m";
+        const std::string BRIGHT_RED = "\033[91m";
+        const std::string BRIGHT_GREEN = "\033[92m";
+        const std::string BRIGHT_YELLOW = "\033[93m";
+    }
+
     const std::string CANCEL_COMMAND = "cancel";
+    const std::string MENU_SEPARATOR = "---";
 
     void clearInputBuffer() {
         std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
@@ -198,20 +214,7 @@ namespace {
     std::string getMaskedPassword() {
         std::string password;
         char ch;
-
-#ifdef _WIN32
-        while ((ch = _getch()) != '\r') {
-            if (ch == '\b') {
-                if (!password.empty()) {
-                    password.pop_back();
-                    std::cout << "\b \b";
-                }
-            } else {
-                password += ch;
-                std::cout << '*';
-            }
-        }
-#else
+        
         termios oldt, newt;
         tcgetattr(STDIN_FILENO, &oldt);
         newt = oldt;
@@ -219,7 +222,7 @@ namespace {
         tcsetattr(STDIN_FILENO, TCSANOW, &newt);
 
         while (read(STDIN_FILENO, &ch, 1) > 0 && ch != '\n') {
-            if (ch == 127 || ch == 8) {
+            if (ch == 127 || ch == 8) { // Backspace
                 if (!password.empty()) {
                     password.pop_back();
                     std::cout << "\b \b" << std::flush;
@@ -230,16 +233,64 @@ namespace {
             }
         }
         tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-#endif
         std::cout << std::endl;
         return password;
     }
-}
 
-CLI::CLI(Authenticator& auth, UserManager& userManager, FileManager& fileManager)
+    size_t count_utf8_chars(const std::string& str) {
+        size_t length = 0;
+        for (unsigned char c : str) {
+            if ((c & 0xC0) != 0x80) {
+                length++;
+            }
+        }
+        return length;
+    }
+
+    void displayMenu(const std::string& title, const std::vector<std::string>& items) {
+        size_t maxWidth = count_utf8_chars(title);
+        for (const auto& item : items) {
+            if (item != MENU_SEPARATOR) {
+                maxWidth = std::max(maxWidth, count_utf8_chars(item));
+            }
+        }
+
+        std::string h_line;
+        for(size_t i = 0; i < maxWidth + 2; ++i) h_line += "═";
+
+        std::cout << "\n" << Color::BRIGHT_YELLOW << "╔" << h_line << "╗\n";
+        
+        size_t titlePad = maxWidth - count_utf8_chars(title);
+        std::cout << "║ " << Color::BOLD << Color::CYAN << title << std::string(titlePad, ' ') << Color::RESET << Color::BRIGHT_YELLOW << " ║\n";
+        
+        std::cout << "╠" << h_line << "╣\n";
+        
+        for (const auto& item : items) {
+            if (item == MENU_SEPARATOR) {
+                std::cout << "╠" << h_line << "╣\n";
+            } else {
+                size_t itemPad = maxWidth - count_utf8_chars(item);
+                // Раскрашиваем цифры и точку
+                size_t numEndPos = item.find(". ");
+                if (numEndPos != std::string::npos) {
+                     std::cout << "║ " << Color::BRIGHT_YELLOW << item.substr(0, numEndPos + 1) << Color::RESET
+                              << item.substr(numEndPos + 1) << std::string(itemPad, ' ') << Color::BRIGHT_YELLOW << " ║\n";
+                } else {
+                     std::cout << "║ " << Color::RESET << item << std::string(itemPad, ' ') << Color::BRIGHT_YELLOW << " ║\n";
+                }
+            }
+        }
+        
+        std::cout << "╚" << h_line << "╝" << Color::RESET << std::endl;
+    }
+
+} // namespace
+
+CLI::CLI(Authenticator& auth, UserManager& userManager, FileManager& fileManager, SystemSettings& settings)
     : m_auth(auth),
       m_userManager(userManager),
       m_fileManager(fileManager),
+      m_settings(settings),
       m_currentUser(nullptr),
       m_shouldRun(true) {}
 
@@ -252,23 +303,23 @@ void CLI::run() {
             handleUserActions();
         }
     }
-    std::cout << "\n[✓] Завершение работы. До свидания!" << std::endl;
+    std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Завершение работы. До свидания!" << std::endl;
 }
 
 void CLI::handleAuthScreen() {
-    std::cout << "\n╔═══════════════════════════════════╗"
-              << "\n║    Система Управления Доступом    ║"
-              << "\n╠═══════════════════════════════════╣"
-              << "\n║ 1. Вход                           ║"
-              << "\n║ 2. Регистрация                    ║"
-              << "\n║ 0. Выход                          ║"
-              << "\n╚═══════════════════════════════════╝" << std::endl;
-    std::cout << "> " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
+    displayMenu("Система Управления Доступом", {
+        "1. Вход",
+        "2. Регистрация",
+        MENU_SEPARATOR,
+        "0. Выход"
+    });
+    
+    std::cout << Color::BRIGHT_YELLOW << "> " << Color::RESET << std::flush;
     int choice;
     std::cin >> choice;
 
     if (std::cin.fail()) {
-        std::cout << "\n[✗] Некорректный ввод. Пожалуйста, введите число." << std::endl;
+        std::cout << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Некорректный ввод. Пожалуйста, введите число." << std::endl;
         std::cin.clear();
         clearInputBuffer();
         return;
@@ -279,84 +330,118 @@ void CLI::handleAuthScreen() {
         case 1: handleLogin(); break;
         case 2: handleRegistration(); break;
         case 0: m_shouldRun = false; break;
-        default: std::cout << "\n[✗] Неизвестная команда." << std::endl; break;
+        default: std::cout << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Неизвестная команда." << std::endl; break;
     }
 }
 
 void CLI::handleLogin() {
-    std::cout << "\n--- Вход в систему ---" << std::endl;
+    std::cout << "\n" << Color::BLUE << "--- Вход в систему ---" << Color::RESET << std::endl;
     std::string username, password;
 
-    std::cout << "Имя пользователя: " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
+    std::cout << "Имя пользователя: " << std::flush;
     std::getline(std::cin, username);
     
-    std::cout << "Пароль: " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
+    std::cout << "Пароль: " << std::flush;
     password = getMaskedPassword(); 
     
     try {
         m_currentUser = m_auth.login(username, password);
-        std::cout << "\n[✓] Добро пожаловать, " << m_currentUser->getUsername() << "!" << std::endl;
+        std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Добро пожаловать, " 
+                  << Color::BOLD << m_currentUser->getUsername() << Color::RESET << "!" << std::endl;
     } 
     catch (const AuthenticationException& e) {
-        std::cout << "\n[✗] Ошибка входа: " << e.what() << std::endl;
+        std::cout << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Ошибка входа: " << e.what() << std::endl;
     } 
     catch (const std::exception& e) {
-        std::cerr << "\n[✗] Произошла непредвиденная системная ошибка: " << e.what() << std::endl;
+        std::cerr << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Произошла непредвиденная системная ошибка: " << e.what() << std::endl;
     }
 }
 
 void CLI::handleRegistration() {
-    std::cout << "\n--- Регистрация нового пользователя ---" << std::endl;
+    std::cout << "\n" << Color::BLUE << "--- Регистрация нового пользователя ---" << Color::RESET << std::endl;
     std::string username, password, passwordConfirm;
     
-    std::cout << "Введите новое имя пользователя: " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
+    std::cout << "Введите новое имя пользователя: " << std::flush;
     std::getline(std::cin, username);
     
-    std::cout << "Введите пароль (мин. 4 символа): " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
+    std::cout << "Введите пароль (мин. 4 символа): " << std::flush;
     password = getMaskedPassword();
 
-    std::cout << "Подтвердите пароль: " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
+    std::cout << "Подтвердите пароль: " << std::flush;
     passwordConfirm = getMaskedPassword();
 
     if (password != passwordConfirm) {
-        std::cout << "\n[✗] Ошибка: пароли не совпадают." << std::endl;
+        std::cout << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Ошибка: пароли не совпадают." << std::endl;
         return;
     }
 
     try {
         m_userManager.createUser(username, password);
-        std::cout << "\n[✓] Пользователь '" << username << "' успешно зарегистрирован. Теперь вы можете войти." << std::endl;
+        std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Пользователь '" 
+                  << Color::BOLD << username << Color::RESET << "' успешно зарегистрирован. Теперь вы можете войти." << std::endl;
     } catch (const std::exception& e) {
-        std::cerr << "\n[✗] Ошибка регистрации: " << e.what() << std::endl;
+        std::cerr << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Ошибка регистрации: " << e.what() << std::endl;
     }
 }
 
 void CLI::showMainMenu() const {
-    std::cout << "\n╔═══════════════════════════════════╗"
-              << "\n║ Меню (Пользователь: " << m_currentUser->getUsername() << ")"
-              << "\n╠═══════════════════════════════════╣"
-              << "\n║ 1. Прочитать файл                 ║"
-              << "\n║ 2. Записать в файл                ║"
-              << "\n║ 3. Копировать файл                ║"
-              << "\n║ 4. Переместить файл               ║";
-    if (PermissionManager::has(*m_currentUser, Permission::DELETE_USER)) {
-        std::cout << "\n║ 5. Удалить пользователя (Админ)     ║";
+    const std::string title = "Меню (Пользователь: " + m_currentUser->getUsername() + ")";
+    std::vector<std::string> items = {
+        "1. Прочитать файл",
+        "2. Записать в файл",
+        "3. Копировать файл",
+        "4. Переместить файл"
+    };
+    if (m_currentUser->getRole() == Role::ADMIN) {
+        items.push_back("5. Удалить пользователя (Админ)");
+        items.push_back("6. Создать пользователя (Админ)");
+        items.push_back("7. Настройки системы (Админ)");
     }
-    std::cout << "\n╠═══════════════════════════════════╣"
-              << "\n║ 9. Выйти из аккаунта              ║"
-              << "\n║ 0. Выйти из приложения            ║"
-              << "\n╚═══════════════════════════════════╝" << std::endl;
-    std::cout << "> " << std::flush; // ИЗМЕНЕНИЕ: Добавлен std::flush
+    items.push_back(MENU_SEPARATOR);
+    items.push_back("9. Выйти из аккаунта");
+    items.push_back("0. Выйти из приложения");
+
+    displayMenu(title, items);
 }
+
+void CLI::handleSystemSettings() {
+    std::cout << "\n" << Color::BLUE << "--- Настройки Системы ---" << Color::RESET << std::endl;
+    std::cout << "Текущее макс. кол-во попыток входа: " << Color::BOLD << m_settings.maxLoginAttempts << Color::RESET << std::endl;
+    std::cout << Color::CYAN << "-> " << Color::RESET << "Введите новое значение (например, 5) или '" << CANCEL_COMMAND << "' для отмены: " << std::flush;
+
+    std::string input;
+    std::getline(std::cin, input);
+    if (input == CANCEL_COMMAND || input.empty()) {
+        std::cout << "Отмена." << std::endl;
+        return;
+    }
+    
+    try {
+        int newMaxAttempts = std::stoi(input);
+        if (newMaxAttempts <= 0) {
+            std::cout << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Значение должно быть положительным числом." << std::endl;
+            return;
+        }
+        m_settings.maxLoginAttempts = newMaxAttempts;
+        std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Максимальное количество попыток входа изменено на " 
+                  << Color::BOLD << m_settings.maxLoginAttempts << Color::RESET << "." << std::endl;
+    } catch (const std::invalid_argument&) {
+        std::cout << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Некорректный ввод. Пожалуйста, введите целое число." << std::endl;
+    } catch (const std::out_of_range&) {
+        std::cout << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Введенное число слишком велико." << std::endl;
+    }
+}
+
 
 void CLI::handleUserActions() {
     int choice = -1;
     while (m_currentUser && m_shouldRun) {
         showMainMenu();
+        std::cout << Color::BRIGHT_YELLOW << "> " << Color::RESET << std::flush;
         std::cin >> choice;
 
         if (std::cin.fail()) {
-            std::cout << "\n[✗] Некорректный ввод. Пожалуйста, введите число." << std::endl;
+            std::cout << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Некорректный ввод. Пожалуйста, введите число." << std::endl;
             std::cin.clear();
             clearInputBuffer();
             choice = -1;
@@ -368,7 +453,7 @@ void CLI::handleUserActions() {
         try {
             switch (choice) {
                 case 1: {
-                    std::cout << "-> Введите путь к файлу для чтения (или '" << CANCEL_COMMAND << "'): " << std::flush;
+                    std::cout << Color::CYAN << "-> " << Color::RESET << "Введите путь к файлу для чтения (или '" << CANCEL_COMMAND << "'): " << std::flush;
                     std::string path;
                     std::getline(std::cin, path);
                     if (path == CANCEL_COMMAND || path.empty()) break;
@@ -376,85 +461,100 @@ void CLI::handleUserActions() {
                     break;
                 }
                 case 2: {
-                    std::cout << "-> Введите путь к файлу для записи (или '" << CANCEL_COMMAND << "'): " << std::flush;
+                    std::cout << Color::CYAN << "-> " << Color::RESET << "Введите путь к файлу для записи (или '" << CANCEL_COMMAND << "'): " << std::flush;
                     std::string path;
                     std::getline(std::cin, path);
                     if (path == CANCEL_COMMAND || path.empty()) break;
 
-                    std::cout << "-> Введите содержимое (одной строкой): " << std::flush;
+                    std::cout << Color::CYAN << "-> " << Color::RESET << "Введите содержимое (одной строкой): " << std::flush;
                     std::string content;
                     std::getline(std::cin, content);
                     m_fileManager.writeFile(*m_currentUser, path, content);
-                    std::cout << "\n[✓] Запись в файл '" << path << "' успешно завершена." << std::endl;
+                    std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Запись в файл '" << path << "' успешно завершена." << std::endl;
                     break;
                 }
-                case 3: {
-                    std::cout << "-> Введите путь к исходному файлу (или '" << CANCEL_COMMAND << "'): " << std::flush;
+                case 3: case 4: {
+                     std::cout << Color::CYAN << "-> " << Color::RESET << "Введите путь к исходному файлу (или '" << CANCEL_COMMAND << "'): " << std::flush;
                     std::string source;
                     std::getline(std::cin, source);
                     if (source == CANCEL_COMMAND || source.empty()) break;
 
-                    std::cout << "-> Введите путь к файлу/папке назначения: " << std::flush;
+                    std::cout << Color::CYAN << "-> " << Color::RESET << "Введите путь к файлу/папке назначения: " << std::flush;
                     std::string dest;
                     std::getline(std::cin, dest);
                     if (dest == CANCEL_COMMAND || dest.empty()) break;
-
-                    m_fileManager.copyFile(*m_currentUser, source, dest);
-                    std::cout << "\n[✓] Файл '" << source << "' успешно скопирован." << std::endl;
-                    break;
-                }
-                case 4: {
-                    std::cout << "-> Введите путь к исходному файлу (или '" << CANCEL_COMMAND << "'): " << std::flush;
-                    std::string source;
-                    std::getline(std::cin, source);
-                    if (source == CANCEL_COMMAND || source.empty()) break;
-
-                    std::cout << "-> Введите путь к файлу/папке назначения: " << std::flush;
-                    std::string dest;
-                    std::getline(std::cin, dest);
-                    if (dest == CANCEL_COMMAND || dest.empty()) break;
-
-                    m_fileManager.moveFile(*m_currentUser, source, dest);
-                    std::cout << "\n[✓] Файл '" << source << "' успешно перемещен." << std::endl;
+                    
+                    if (choice == 3) {
+                         m_fileManager.copyFile(*m_currentUser, source, dest);
+                         std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Файл '" << source << "' успешно скопирован." << std::endl;
+                    } else {
+                         m_fileManager.moveFile(*m_currentUser, source, dest);
+                         std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Файл '" << source << "' успешно перемещен." << std::endl;
+                    }
                     break;
                 }
                 case 5: {
                     if (!PermissionManager::has(*m_currentUser, Permission::DELETE_USER)) {
-                        std::cout << "\n[✗] Неизвестная команда." << std::endl;
-                        break;
+                         std::cout << "\n" << Color::RED << "[✗] " << Color::RESET << "Неизвестная команда." << std::endl; break;
                     }
-                    std::cout << "\n--- Список Пользователей ---" << std::endl;
+                    std::cout << "\n" << Color::BLUE << "--- Список Пользователей ---" << Color::RESET << std::endl;
                     const auto users = m_userManager.listAllUsers(*m_currentUser);
                     for (const auto& user : users) {
-                        std::cout << "- " << user->getUsername()
-                                  << " (Роль: " << (user->getRole() == Role::ADMIN ? "Админ" : "Пользователь") << ")"
-                                  << (user->isLocked() ? " [ЗАБЛОКИРОВАН]" : "") << std::endl;
+                        std::cout << "- " << Color::BOLD << user->getUsername() << Color::RESET
+                                  << " (Роль: " << (user->getRole() == Role::ADMIN ? Color::MAGENTA : Color::GREEN) 
+                                  << (user->getRole() == Role::ADMIN ? "Админ" : "Пользователь") << Color::RESET << ")"
+                                  << (user->isLocked() ? Color::BRIGHT_RED + " [ЗАБЛОКИРОВАН]" + Color::RESET : "") << std::endl;
                     }
-                    std::cout << "--------------------------\n";
+                    std::cout << Color::BLUE << "--------------------------\n" << Color::RESET;
 
-                    std::cout << "-> Введите имя пользователя для удаления (или '" << CANCEL_COMMAND << "'): " << std::flush;
+                    std::cout << Color::CYAN << "-> " << Color::RESET << "Введите имя пользователя для удаления (или '" << CANCEL_COMMAND << "'): " << std::flush;
                     std::string usernameToDelete;
                     std::getline(std::cin, usernameToDelete);
                     if (usernameToDelete == CANCEL_COMMAND || usernameToDelete.empty()) break;
 
                     m_userManager.deleteUser(*m_currentUser, usernameToDelete);
-                    std::cout << "\n[✓] Пользователь '" << usernameToDelete << "' успешно удален." << std::endl;
+                    std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Пользователь '" << usernameToDelete << "' успешно удален." << std::endl;
+                    break;
+                }
+                case 6: {
+                    if (!PermissionManager::has(*m_currentUser, Permission::CREATE_USER)) {
+                        std::cout << "\n" << Color::RED << "[✗] " << Color::RESET << "Неизвестная команда." << std::endl; break;
+                    }
+                    std::cout << "\n" << Color::BLUE << "--- Создание нового пользователя ---" << Color::RESET << std::endl;
+                    std::string newUsername, newPassword;
+
+                    std::cout << Color::CYAN << "-> " << Color::RESET << "Введите имя нового пользователя (или '" << CANCEL_COMMAND << "'): " << std::flush;
+                    std::getline(std::cin, newUsername);
+                    if (newUsername == CANCEL_COMMAND || newUsername.empty()) break;
+
+                    std::cout << Color::CYAN << "-> " << Color::RESET << "Введите пароль (мин. 4 символа): " << std::flush;
+                    newPassword = getMaskedPassword();
+
+                    m_userManager.createUserByAdmin(*m_currentUser, newUsername, newPassword);
+                    std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Пользователь '" << newUsername << "' успешно создан." << std::endl;
+                    break;
+                }
+                case 7: {
+                     if (m_currentUser->getRole() != Role::ADMIN) {
+                        std::cout << "\n" << Color::RED << "[✗] " << Color::RESET << "Неизвестная команда." << std::endl; break;
+                    }
+                    handleSystemSettings();
                     break;
                 }
                 case 9:
                     m_currentUser = nullptr;
-                    std::cout << "\n[✓] Вы вышли из системы." << std::endl;
+                    std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Вы вышли из системы." << std::endl;
                     break;
                 case 0:
                     m_shouldRun = false;
                     m_currentUser = nullptr;
                     break;
                 default:
-                    std::cout << "\n[✗] Неизвестная команда. Попробуйте еще раз." << std::endl;
+                    std::cout << "\n" << Color::RED << "[✗] " << Color::RESET << "Неизвестная команда. Попробуйте еще раз." << std::endl;
                     break;
             }
         } catch (const std::exception& e) {
-            std::cerr << "\n[✗] Операция не удалась: " << e.what() << std::endl;
+            std::cerr << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Операция не удалась: " << e.what() << std::endl;
         }
     }
 }
@@ -468,14 +568,17 @@ void CLI::handleUserActions() {
 #pragma once
 #include <memory>
 
+// Forward declarations
 class Authenticator;
 class UserManager;
 class FileManager;
 class User;
+struct SystemSettings;
 
 class CLI {
 public:
-    CLI(Authenticator& auth, UserManager& userManager, FileManager& fileManager);
+    // Конструктор принимает новый параметр - SystemSettings
+    CLI(Authenticator& auth, UserManager& userManager, FileManager& fileManager, SystemSettings& settings);
     void run();
 
 private:
@@ -485,11 +588,16 @@ private:
     void handleUserActions();
     void showMainMenu() const;
 
+    // Новый метод для управления настройками
+    void handleSystemSettings();
+
     Authenticator& m_auth;
     UserManager& m_userManager;
     FileManager& m_fileManager;
+    // Ссылка на настройки, чтобы CLI мог их изменять
+    SystemSettings& m_settings; 
     std::shared_ptr<User> m_currentUser;
-    bool m_shouldRun; // Флаг для контроля основного цикла программы
+    bool m_shouldRun;
 };
 ```
 
@@ -559,6 +667,28 @@ public:
 enum class Role {
     USER,  // Обычный пользователь
     ADMIN  // Администратор
+};
+```
+
+---
+
+## <a name="srccoreSystemSettingsh"></a>Файл: `src/core/SystemSettings.h`
+
+```cpp
+#pragma once
+
+/**
+ * @brief Структура для хранения глобальных настроек системы.
+ * Это позволяет централизованно управлять параметрами, которые могут
+ * изменяться администратором во время выполнения программы.
+ */
+struct SystemSettings {
+    /**
+     * @brief Максимальное количество последовательных неудачных попыток входа,
+     * после которого аккаунт пользователя будет заблокирован.
+     * Значение по умолчанию: 3.
+     */
+    int maxLoginAttempts = 3;
 };
 ```
 
@@ -934,14 +1064,17 @@ private:
 #include "services/UserManager.h"
 #include "services/FileManager.h"
 #include "cli/CLI.h"
-
+#include "core/SystemSettings.h" // Подключаем новый заголовок
 
 int main() {
     const std::string LOG_FILE_PATH = "app_activity.log";
+    const std::string USER_DATA_PATH = "users.data";
     
     try {
+        SystemSettings settings;
+
         FileLogger logger(LOG_FILE_PATH);
-        FileUserRepository userRepo("users.data");
+        FileUserRepository userRepo(USER_DATA_PATH);
 
         if (!userRepo.findByUsername("admin")) {
             auto adminUser = std::make_shared<User>("admin", "admin123", Role::ADMIN);
@@ -949,11 +1082,11 @@ int main() {
             logger.log("Система инициализирована: создан пользователь 'admin' с паролем 'admin123'.");
         }
         
-        Authenticator auth(userRepo, logger);
+        Authenticator auth(userRepo, logger, settings);
         UserManager userManager(userRepo, logger);
-        FileManager fileManager(logger, LOG_FILE_PATH);
+        FileManager fileManager(logger, LOG_FILE_PATH, USER_DATA_PATH);
         
-        CLI cli(auth, userManager, fileManager);
+        CLI cli(auth, userManager, fileManager, settings);
         cli.run();
 
     } catch (const std::exception& e) {
@@ -977,166 +1110,140 @@ int main() {
 #include <filesystem>
 #include <iostream>
 
-// Конструктор, который принимает логгер и путь к файлу журнала для его защиты
-FileManager::FileManager(ILogger& logger, const std::string& logFilePath) 
-    : m_logger(logger), m_logFilePath(logFilePath) {}
+// Конструктор, который принимает логгер и пути к защищаемым файлам
+FileManager::FileManager(ILogger& logger, const std::string& logFilePath, const std::string& userDbPath) 
+    : m_logger(logger), m_logFilePath(logFilePath), m_userDbPath(userDbPath) {}
 
 namespace {
-    /**
-     * @brief ВАЖНАЯ ФУНКЦИЯ: Создает родительские директории для указанного пути.
-     * 
-     * Проверяет, существует ли родительский каталог для файла,
-     * и если нет, рекурсивно создает всю необходимую структуру.
-     * @param path Путь к конечному файлу.
-     */
     void ensureDirectoryExists(const std::filesystem::path& path) {
         auto parentDir = path.parent_path();
         if (!parentDir.empty() && !std::filesystem::exists(parentDir)) {
-            // Эта команда создает все несуществующие папки в пути
             std::filesystem::create_directories(parentDir);
+        }
+    }
+
+    bool isSystemFile(const std::string& path_str, const std::string& logFilePath, const std::string& userDbPath) {
+        if (!std::filesystem::exists(path_str)) {
+            return false;
+        }
+        try {
+            const std::filesystem::path path(path_str);
+            if (std::filesystem::exists(logFilePath) && std::filesystem::equivalent(path, logFilePath)) {
+                return true;
+            }
+            if (std::filesystem::exists(userDbPath) && std::filesystem::equivalent(path, userDbPath)) {
+                return true;
+            }
+        } catch (const std::filesystem::filesystem_error&) {
+            // Ошибка может возникнуть, если файл был удален между exists() и equivalent()
+            return false;
+        }
+        return false;
+    }
+
+    void ensureNotSystemFileForUser(const User& actor, const std::string& path, const std::string& logPath, const std::string& dbPath, ILogger& logger) {
+        if (actor.getRole() != Role::ADMIN && isSystemFile(path, logPath, dbPath)) {
+            logger.log("ОТКАЗ: Пользователь '" + actor.getUsername() + "' попытался получить доступ к системному файлу: " + path);
+            throw std::runtime_error("Доступ к системным файлам разрешен только администраторам.");
         }
     }
 }
 
 void FileManager::readFile(const User& actor, const std::string& filePath) {
     PermissionManager::ensure(actor, Permission::READ);
+    ensureNotSystemFileForUser(actor, filePath, m_logFilePath, m_userDbPath, m_logger);
 
-    if (std::filesystem::exists(filePath) && std::filesystem::equivalent(filePath, m_logFilePath)) {
-        if (actor.getRole() != Role::ADMIN) {
-            m_logger.log("ОТКАЗ: Пользователь '" + actor.getUsername() + "' попытался прочитать файл журнала.");
-            throw std::runtime_error("Доступ к файлу журнала разрешен только администраторам.");
-        }
-    }
-
-    // Если файл не существует, он создается
     if (!std::filesystem::exists(filePath)) {
         std::ofstream newFile(filePath); 
         if (!newFile.is_open()) {
-             m_logger.log("ОШИБКА: Пользователь '" + actor.getUsername() + "' пытался прочитать несуществующий файл '" + filePath + "', но создать его не удалось.");
-             throw std::runtime_error("Файл не существует и не может быть создан: " + filePath + ". Проверьте права доступа.");
+             throw std::runtime_error("Файл не существует и не может быть создан: " + filePath);
         }
         newFile.close();
         std::cout << "Файл '" << filePath << "' не найден и был создан." << std::endl;
-        m_logger.log("УСПЕХ: Пользователь '" + actor.getUsername() + "' запросил чтение несуществующего файла '" + filePath + "'. Файл создан.");
+        m_logger.log("Пользователь '" + actor.getUsername() + "' запросил несуществующий файл '" + filePath + "'. Файл создан.");
         return;
     }
     
     std::ifstream file(filePath);
     if (!file.is_open()) {
-        m_logger.log("ОШИБКА: Пользователь '" + actor.getUsername() + "' не смог прочитать файл '" + filePath + "'. Причина: Отказано в доступе ОС.");
         throw std::runtime_error("Не удалось открыть файл для чтения: " + filePath);
     }
 
     std::stringstream buffer;
     buffer << file.rdbuf();
-    
-    std::cout << "\n--- Содержимое файла " << filePath << " ---\n"
-              << buffer.str()
-              << "\n--- Конец файла ---\n";
-
-    m_logger.log("УСПЕХ: Пользователь '" + actor.getUsername() + "' прочитал файл '" + filePath + "'.");
+    std::cout << "\n--- Содержимое файла " << filePath << " ---\n" << buffer.str() << "\n--- Конец файла ---\n";
+    m_logger.log("Пользователь '" + actor.getUsername() + "' прочитал файл '" + filePath + "'.");
 }
 
 void FileManager::writeFile(const User& actor, const std::string& filePath, const std::string& content) {
     PermissionManager::ensure(actor, Permission::WRITE);
-
-    if (std::filesystem::exists(filePath) && std::filesystem::equivalent(filePath, m_logFilePath)) {
-        if (actor.getRole() != Role::ADMIN) {
-             m_logger.log("ОТКАЗ: Пользователь '" + actor.getUsername() + "' попытался записать в файл журнала.");
-             throw std::runtime_error("Доступ к файлу журнала разрешен только администраторам.");
-        }
-    }
+    ensureNotSystemFileForUser(actor, filePath, m_logFilePath, m_userDbPath, m_logger);
 
     try {
-        // Убеждаемся, что директория для файла существует (создаем, если нужно)
         ensureDirectoryExists(filePath);
     } catch (const std::filesystem::filesystem_error& e) {
-         m_logger.log("ОШИБКА: Пользователь '" + actor.getUsername() + "' не смог записать в файл '" + filePath + "'. Причина: не удалось создать директорию назначения. " + e.what());
-         throw std::runtime_error("Операция записи не удалась. Убедитесь, что у вас есть права на запись в эту директорию. Системная ошибка: " + std::string(e.what()));
+         throw std::runtime_error("Не удалось создать директорию для файла. " + std::string(e.what()));
     }
 
     std::ofstream file(filePath);
     if (!file.is_open()) {
-        m_logger.log("ОШИБКА: Пользователь '" + actor.getUsername() + "' не смог записать в файл '" + filePath + "'. Причина: Не удалось открыть файл (возможно, нет прав доступа).");
-        throw std::runtime_error("Не удалось открыть файл для записи: " + filePath + ". Проверьте права доступа.");
+        throw std::runtime_error("Не удалось открыть файл для записи: " + filePath);
     }
 
     file << content;
-    
     if (!file) {
-         m_logger.log("ОШИБКА: Пользователь '" + actor.getUsername() + "' не смог записать в файл '" + filePath + "'. Причина: Произошла ошибка во время записи.");
         throw std::runtime_error("Произошла ошибка во время записи в файл: " + filePath);
     }
     
-    m_logger.log("УСПЕХ: Пользователь '" + actor.getUsername() + "' записал " + std::to_string(content.length()) + " байт в файл '" + filePath + "'.");
+    m_logger.log("Пользователь '" + actor.getUsername() + "' записал в файл '" + filePath + "'.");
 }
 
 void FileManager::copyFile(const User& actor, const std::string& sourceStr, const std::string& destStr) {
     PermissionManager::ensure(actor, Permission::COPY_MOVE);
-
-    if (actor.getRole() != Role::ADMIN) {
-        if ((std::filesystem::exists(sourceStr) && std::filesystem::equivalent(sourceStr, m_logFilePath)) ||
-            (std::filesystem::exists(destStr) && std::filesystem::equivalent(destStr, m_logFilePath))) {
-            m_logger.log("ОТКАЗ: Пользователь '" + actor.getUsername() + "' попытался скопировать файл журнала.");
-            throw std::runtime_error("Доступ к файлу журнала запрещен.");
-        }
-    }
-
-    std::filesystem::path sourcePath(sourceStr);
+    ensureNotSystemFileForUser(actor, sourceStr, m_logFilePath, m_userDbPath, m_logger);
+    
     std::filesystem::path destPath(destStr);
-    std::filesystem::path finalDestPath = destPath;
-
-    // Если путь назначения - существующая папка, копируем файл внутрь
-    if (std::filesystem::exists(destPath) && std::filesystem::is_directory(destPath)) {
-        finalDestPath = destPath / sourcePath.filename();
+    if(isSystemFile(destStr, m_logFilePath, m_userDbPath) && actor.getRole() != Role::ADMIN){
+         m_logger.log("ОТКАЗ: Пользователь '" + actor.getUsername() + "' попытался перезаписать системный файл: " + destStr);
+         throw std::runtime_error("Доступ к системным файлам разрешен только администраторам.");
     }
+
 
     try {
-        // **КЛЮЧЕВОЙ МОМЕНТ**: Гарантируем, что родительская директория для
-        // конечного файла существует. Если нет — она будет создана.
+        std::filesystem::path sourcePath(sourceStr);
+        std::filesystem::path finalDestPath = destPath;
+        if (std::filesystem::exists(destPath) && std::filesystem::is_directory(destPath)) {
+            finalDestPath = destPath / sourcePath.filename();
+        }
         ensureDirectoryExists(finalDestPath); 
-        
-        const auto options = std::filesystem::copy_options::overwrite_existing;
-        std::filesystem::copy(sourcePath, finalDestPath, options);
-        
-        m_logger.log("УСПЕХ: Пользователь '" + actor.getUsername() + "' скопировал файл из '" + sourceStr + "' в '" + finalDestPath.string() + "'.");
+        std::filesystem::copy(sourcePath, finalDestPath, std::filesystem::copy_options::overwrite_existing);
+        m_logger.log("Пользователь '" + actor.getUsername() + "' скопировал файл из '" + sourceStr + "' в '" + finalDestPath.string() + "'.");
     } catch (const std::filesystem::filesystem_error& e) {
-        m_logger.log("ОШИБКА: Пользователь '" + actor.getUsername() + "' не смог скопировать файл из '" + sourceStr + "'. Причина: " + e.what());
-        throw std::runtime_error("Операция копирования не удалась. Проверьте путь и права доступа. Системная ошибка: " + std::string(e.what()));
+        throw std::runtime_error("Операция копирования не удалась. " + std::string(e.what()));
     }
 }
 
 void FileManager::moveFile(const User& actor, const std::string& sourceStr, const std::string& destStr) {
     PermissionManager::ensure(actor, Permission::COPY_MOVE);
+    ensureNotSystemFileForUser(actor, sourceStr, m_logFilePath, m_userDbPath, m_logger);
 
-    if (actor.getRole() != Role::ADMIN) {
-       if ((std::filesystem::exists(sourceStr) && std::filesystem::equivalent(sourceStr, m_logFilePath)) ||
-           (std::filesystem::exists(destStr) && std::filesystem::equivalent(destStr, m_logFilePath))) {
-            m_logger.log("ОТКАЗ: Пользователь '" + actor.getUsername() + "' попытался переместить файл журнала.");
-            throw std::runtime_error("Доступ к файлу журнала запрещен.");
-        }
-    }
-
-    std::filesystem::path sourcePath(sourceStr);
     std::filesystem::path destPath(destStr);
-    std::filesystem::path finalDestPath = destPath;
-    
-    // Если путь назначения - существующая папка, перемещаем файл внутрь
-    if (std::filesystem::exists(destPath) && std::filesystem::is_directory(destPath)) {
-        finalDestPath = destPath / sourcePath.filename();
+     if(isSystemFile(destStr, m_logFilePath, m_userDbPath) && actor.getRole() != Role::ADMIN){
+         m_logger.log("ОТКАЗ: Пользователь '" + actor.getUsername() + "' попытался перезаписать системный файл: " + destStr);
+         throw std::runtime_error("Доступ к системным файлам разрешен только администраторам.");
     }
-
+    
     try {
-        // **КЛЮЧЕВОЙ МОМЕНТ**: Гарантируем, что родительская директория для
-        // конечного файла существует. Если нет — она будет создана.
+        std::filesystem::path sourcePath(sourceStr);
+        std::filesystem::path finalDestPath = destPath;
+        if (std::filesystem::exists(destPath) && std::filesystem::is_directory(destPath)) {
+            finalDestPath = destPath / sourcePath.filename();
+        }
         ensureDirectoryExists(finalDestPath);
-        
         std::filesystem::rename(sourcePath, finalDestPath);
-
-        m_logger.log("УСПЕХ: Пользователь '" + actor.getUsername() + "' переместил файл из '" + sourceStr + "' в '" + finalDestPath.string() + "'.");
+        m_logger.log("Пользователь '" + actor.getUsername() + "' переместил файл из '" + sourceStr + "' в '" + finalDestPath.string() + "'.");
     } catch (const std::filesystem::filesystem_error& e) {
-        m_logger.log("ОШИБКА: Пользователь '" + actor.getUsername() + "' не смог переместить файл из '" + sourceStr + "'. Причина: " + e.what());
-        throw std::runtime_error("Операция перемещения не удалась. Проверьте путь и права доступа. Системная ошибка: " + std::string(e.what()));
+        throw std::runtime_error("Операция перемещения не удалась. " + std::string(e.what()));
     }
 }
 ```
@@ -1153,29 +1260,18 @@ void FileManager::moveFile(const User& actor, const std::string& sourceStr, cons
 
 class FileManager {
 public:
-    explicit FileManager(ILogger& logger, const std::string& logFilePath);
+    // Конструктор теперь принимает пути к двум защищаемым системным файлам
+    explicit FileManager(ILogger& logger, const std::string& logFilePath, const std::string& userDbPath);
 
-    /**
-     * @brief Читает содержимое файла и выводит его в консоль.
-     * Если файл не существует, создает его.
-     */
     void readFile(const User& actor, const std::string& filePath);
-
     void writeFile(const User& actor, const std::string& filePath, const std::string& content);
-
-    /**
-     * @brief Копирует файл. Создает директорию назначения, если она не существует.
-     */
     void copyFile(const User& actor, const std::string& sourcePath, const std::string& destPath);
-    
-    /**
-     * @brief Перемещает файл. Создает директорию назначения, если она не существует.
-     */
     void moveFile(const User& actor, const std::string& sourcePath, const std::string& destPath);
     
 private:
     ILogger& m_logger;
     std::string m_logFilePath;
+    std::string m_userDbPath; // Путь к файлу с данными пользователей
 };
 ```
 
@@ -1192,7 +1288,8 @@ enum class Permission {
     READ,
     WRITE,
     COPY_MOVE,
-    DELETE_USER
+    DELETE_USER,
+    CREATE_USER
 };
 
 class PermissionManager {
@@ -1215,6 +1312,7 @@ public:
                 case Permission::COPY_MOVE:
                     return true;
                 case Permission::DELETE_USER:
+                case Permission::CREATE_USER:
                     return false;
             }
         }
@@ -1253,6 +1351,26 @@ void UserManager::createUser(const std::string& username, const std::string& pas
 
     m_logger.log("Создан новый пользователь: '" + username + "'.");
 }
+
+void UserManager::createUserByAdmin(const User& actor, const std::string& username, const std::string& password) {
+    PermissionManager::ensure(actor, Permission::CREATE_USER);
+
+    if (username.length() < 3) {
+        throw std::runtime_error("Имя пользователя должно быть не менее 3 символов.");
+    }
+    if (password.length() < 4) {
+        throw std::runtime_error("Пароль должен быть не менее 4 символов.");
+    }
+    if (m_userRepository.findByUsername(username)) {
+        throw std::runtime_error("Пользователь с таким именем уже существует.");
+    }
+
+    auto newUser = std::make_shared<User>(username, password, Role::USER);
+    m_userRepository.add(newUser);
+
+    m_logger.log("Администратор '" + actor.getUsername() + "' создал нового пользователя: '" + username + "'.");
+}
+
 
 void UserManager::deleteUser(const User& actor, const std::string& usernameToDelete) {
     PermissionManager::ensure(actor, Permission::DELETE_USER);
@@ -1295,6 +1413,8 @@ public:
     UserManager(IUserRepository& repo, ILogger& logger);
 
     void createUser(const std::string& username, const std::string& password);
+
+    void createUserByAdmin(const User& actor, const std::string& username, const std::string& password);
 
     void deleteUser(const User& actor, const std::string& usernameToDelete);
 

@@ -3,14 +3,17 @@
 #include "../core/ILogger.h"
 #include <memory>
 
-class User; // Forward declaration
+// Forward declaration для уменьшения зависимостей в заголовочных файлах
+class User; 
+struct SystemSettings;
 
 /**
  * @brief Отвечает за логику входа пользователя в систему.
  */
 class Authenticator {
 public:
-    Authenticator(IUserRepository& repo, ILogger& logger, int maxAttempts = 3);
+    // Изменен конструктор для приема объекта настроек по ссылке
+    Authenticator(IUserRepository& repo, ILogger& logger, SystemSettings& settings);
 
     /**
      * @brief Выполняет попытку входа пользователя в систему.
@@ -23,5 +26,6 @@ public:
 private:
     IUserRepository& m_userRepository;
     ILogger& m_logger;
-    const int m_maxFailedAttempts;
+    // Храним ссылку на настройки, чтобы всегда иметь актуальное значение
+    SystemSettings& m_settings;
 };
