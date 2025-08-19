@@ -81,17 +81,23 @@ void FileManager::writeFile(const User& actor, const std::string& filePath, cons
          throw std::runtime_error("Не удалось создать директорию для файла. " + std::string(e.what()));
     }
 
-    std::ofstream file(filePath);
+    // --- НАЧАЛО ИЗМЕНЕНИЙ ---
+    // Открываем файл в режиме дозаписи (append)
+    std::ofstream file(filePath, std::ios_base::app);
     if (!file.is_open()) {
         throw std::runtime_error("Не удалось открыть файл для записи: " + filePath);
     }
 
-    file << content;
+    // Добавляем содержимое и переводим курсор на новую строку
+    file << content << std::endl;
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
     if (!file) {
         throw std::runtime_error("Произошла ошибка во время записи в файл: " + filePath);
     }
     
-    m_logger.log("Пользователь '" + actor.getUsername() + "' записал в файл '" + filePath + "'.");
+    // Обновляем сообщение в логе для ясности
+    m_logger.log("Пользователь '" + actor.getUsername() + "' дозаписал в файл '" + filePath + "'.");
 }
 
 void FileManager::copyFile(const User& actor, const std::string& sourceStr, const std::string& destStr) {

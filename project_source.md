@@ -1,5 +1,5 @@
 # Полный Исходный Код Проекта Системы Управления Доступом
-_Сгенерировано: 2025-08-19 17:54:08_
+_Сгенерировано: 2025-08-19 20:01:24_
 
 ## Содержание
 - [`src/auth/AuthExceptions.h`](#srcauthAuthExceptionsh)
@@ -176,15 +176,15 @@ private:
 #include <limits>
 #include <string>
 #include <vector>
-#include <algorithm> // для std::max
-#include <unistd.h>  // Для POSIX-совместимых систем
-#include <termios.h> // Для POSIX-совместимых систем
+#include <algorithm>
+#include <unistd.h>
+#include <termios.h>
 
 #include "../auth/Authenticator.h"
 #include "../auth/AuthExceptions.h"
 #include "../services/UserManager.h"
 #include "../services/FileManager.h"
-#include "../services/PermissionManager.h"
+#include "../services/PermissionManager.h" // Подключаем для enum-ов
 #include "../core/User.h"
 #include "../core/SystemSettings.h"
 
@@ -270,7 +270,6 @@ namespace {
                 std::cout << "╠" << h_line << "╣\n";
             } else {
                 size_t itemPad = maxWidth - count_utf8_chars(item);
-                // Раскрашиваем цифры и точку
                 size_t numEndPos = item.find(". ");
                 if (numEndPos != std::string::npos) {
                      std::cout << "║ " << Color::BRIGHT_YELLOW << item.substr(0, numEndPos + 1) << Color::RESET
@@ -305,6 +304,8 @@ void CLI::run() {
     }
     std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Завершение работы. До свидания!" << std::endl;
 }
+
+// ... handleAuthScreen, handleLogin, handleRegistration, showMainMenu, handleSystemSettings (без изменений)
 
 void CLI::handleAuthScreen() {
     displayMenu("Система Управления Доступом", {
@@ -432,7 +433,6 @@ void CLI::handleSystemSettings() {
     }
 }
 
-
 void CLI::handleUserActions() {
     int choice = -1;
     while (m_currentUser && m_shouldRun) {
@@ -530,7 +530,48 @@ void CLI::handleUserActions() {
                     std::cout << Color::CYAN << "-> " << Color::RESET << "Введите пароль (мин. 4 символа): " << std::flush;
                     newPassword = getMaskedPassword();
 
-                    m_userManager.createUserByAdmin(*m_currentUser, newUsername, newPassword);
+                    // --- НАЧАЛО ИЗМЕНЕНИЙ ---
+                    std::cout << Color::BLUE << "\n--- Выбор прав для пользователя ---" << Color::RESET << std::endl;
+                    std::cout << "1. Чтение и запись" << std::endl;
+                    std::cout << "2. Копирование и перемещение" << std::endl;
+                    std::cout << "3. Все права (чтение, запись, копирование, перемещение)" << std::endl;
+                    std::cout << Color::BRIGHT_YELLOW << "> " << Color::RESET << std::flush;
+                    
+                    int permChoice;
+                    std::cin >> permChoice;
+                    
+                    if (std::cin.fail()) {
+                        std::cout << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Некорректный ввод." << std::endl;
+                        std::cin.clear();
+                        clearInputBuffer();
+                        break;
+                    }
+                    clearInputBuffer();
+                    
+                    unsigned int permissions = 0;
+                    switch (permChoice) {
+                        case 1:
+                            permissions = static_cast<unsigned int>(Permission::READ) | static_cast<unsigned int>(Permission::WRITE);
+                            break;
+                        case 2:
+                            permissions = static_cast<unsigned int>(Permission::COPY_MOVE);
+                            break;
+                        case 3:
+                            permissions = static_cast<unsigned int>(Permission::READ) | static_cast<unsigned int>(Permission::WRITE) | static_cast<unsigned int>(Permission::COPY_MOVE);
+                            break;
+                        default:
+                            std::cout << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Неверный выбор. Операция отменена." << std::endl;
+                            break;
+                    }
+
+                    if (permissions == 0) {
+                        break; 
+                    }
+                    
+                    // Вызов обновленного метода с передачей маски прав
+                    m_userManager.createUserByAdmin(*m_currentUser, newUsername, newPassword, permissions);
+                    // --- КОНЕЦ ИЗМЕНЕНИЙ ---
+
                     std::cout << "\n" << Color::BRIGHT_GREEN << "[✓] " << Color::RESET << "Пользователь '" << newUsername << "' успешно создан." << std::endl;
                     break;
                 }
@@ -698,20 +739,41 @@ struct SystemSettings {
 
 ```cpp
 #include "User.h"
-#include "../utils/Hash.h" // Подключаем нашу утилиту для хеширования
+#include "../utils/Hash.h" 
+#include "../services/PermissionManager.h" // Для доступа к enum Permission
 
-User::User(const std::string& username, const std::string& rawPassword, Role role)
+User::User(const std::string& username, const std::string& rawPassword, Role role, unsigned int permissions)
     : m_username(username),
-      m_passwordHash(hashPassword(rawPassword)), // Хешируем пароль при создании
+      m_passwordHash(hashPassword(rawPassword)),
       m_role(role),
       m_isLocked(false),
-      m_failedLoginAttempts(0) {}
-User::User(const std::string& username, size_t passwordHash, Role role, bool isLocked, int failedLoginAttempts)
+      m_failedLoginAttempts(0) 
+{
+    if (role == Role::ADMIN) {
+        // Администратор всегда имеет все права, но для полноты установим маску
+        m_permissions = static_cast<unsigned int>(Permission::READ) | 
+                        static_cast<unsigned int>(Permission::WRITE) |
+                        static_cast<unsigned int>(Permission::COPY_MOVE);
+    } else {
+        // Если права не указаны (permissions == 0), это саморегистрация. 
+        // Даем права по умолчанию.
+        if (permissions == 0) {
+            m_permissions = static_cast<unsigned int>(Permission::READ) | static_cast<unsigned int>(Permission::WRITE);
+        } else {
+            // Иначе, это создание пользователя администратором с заданными правами.
+            m_permissions = permissions;
+        }
+    }
+}
+
+User::User(const std::string& username, size_t passwordHash, Role role, bool isLocked, int failedLoginAttempts, unsigned int permissions)
     : m_username(username),
       m_passwordHash(passwordHash),
       m_role(role),
       m_isLocked(isLocked),
-      m_failedLoginAttempts(failedLoginAttempts) {}
+      m_failedLoginAttempts(failedLoginAttempts),
+      m_permissions(permissions) {} // Инициализация нового поля
+
 const std::string& User::getUsername() const {
     return m_username;
 }
@@ -732,13 +794,16 @@ int User::getFailedLoginAttempts() const {
     return m_failedLoginAttempts;
 }
 
+unsigned int User::getPermissions() const {
+    return m_permissions;
+}
+
 void User::lock() {
     m_isLocked = true;
 }
 
 void User::unlock() {
     m_isLocked = false;
-    // При разблокировке также сбрасываем счетчик неудачных попыток
     resetFailedAttempts();
 }
 
@@ -763,20 +828,26 @@ void User::resetFailedAttempts() {
 class User
 {
 public:
-    // Конструктор принимает пароль в открытом виде и сразу хеширует его
-    User(const std::string &username, const std::string &rawPassword, Role role = Role::USER);
+    // Конструктор для регистрации (пользователем) и создания (администратором)
+    // permissions = 0 означает, что будут установлены права по умолчанию для саморегистрации
+    User(const std::string &username, const std::string &rawPassword, Role role = Role::USER, unsigned int permissions = 0);
+    
+    // Конструктор для загрузки пользователя из хранилища
     User(
         const std::string &username,
         size_t passwordHash,
         Role role,
         bool isLocked,
-        int failedLoginAttempts);
-    // Getters - методы для получения доступа к полям класса
+        int failedLoginAttempts,
+        unsigned int permissions);
+
+    // Getters
     const std::string &getUsername() const;
     size_t getPasswordHash() const;
     Role getRole() const;
     bool isLocked() const;
     int getFailedLoginAttempts() const;
+    unsigned int getPermissions() const; // Новый getter для прав
 
     // Методы для изменения состояния объекта
     void lock();
@@ -786,10 +857,11 @@ public:
 
 private:
     std::string m_username;
-    size_t m_passwordHash; // Храним только хеш пароля
+    size_t m_passwordHash; 
     Role m_role;
     bool m_isLocked;
     int m_failedLoginAttempts;
+    unsigned int m_permissions; // Новое поле для битовой маски прав
 };
 ```
 
@@ -933,19 +1005,21 @@ void FileUserRepository::loadFromFile() {
     std::string line;
     while (std::getline(file, line)) {
         std::stringstream ss(line);
-        std::string username, hash_str, role_str, locked_str, attempts_str;
+        std::string username, hash_str, role_str, locked_str, attempts_str, permissions_str;
         if (std::getline(ss, username, ';') &&
             std::getline(ss, hash_str, ';') &&
             std::getline(ss, role_str, ';') &&
             std::getline(ss, locked_str, ';') &&
-            std::getline(ss, attempts_str, ';')) {
+            std::getline(ss, attempts_str, ';') &&
+            std::getline(ss, permissions_str, ';')) { // Чтение нового поля
             try {
                 auto user = std::make_shared<User>(
                     username, 
                     std::stoull(hash_str), 
                     (std::stoi(role_str) == 1) ? Role::ADMIN : Role::USER,
                     (std::stoi(locked_str) == 1), 
-                    std::stoi(attempts_str)
+                    std::stoi(attempts_str),
+                    static_cast<unsigned int>(std::stoul(permissions_str)) // Преобразование и передача прав
                 );
                 m_usersCache[username] = user;
             } catch (const std::exception& e) {
@@ -966,7 +1040,8 @@ void FileUserRepository::saveToFile() {
              << user->getPasswordHash() << ";"
              << static_cast<int>(user->getRole()) << ";"
              << user->isLocked() << ";"
-             << user->getFailedLoginAttempts() << std::endl;
+             << user->getFailedLoginAttempts() << ";"
+             << user->getPermissions() << std::endl; // Запись нового поля
     }
 }
 
@@ -1284,12 +1359,17 @@ private:
 #include "../core/User.h"
 #include <stdexcept>
 
-enum class Permission {
-    READ,
-    WRITE,
-    COPY_MOVE,
-    DELETE_USER,
-    CREATE_USER
+// Права определены как битовые флаги (степени двойки) в ПРАВИЛЬНОМ порядке
+enum class Permission : unsigned int {
+    NONE = 0,
+    // Права, назначаемые пользователям
+    READ      = 1 << 0, // 1 - Право на чтение
+    WRITE     = 1 << 1, // 2 - Право на запись
+    COPY_MOVE = 1 << 2, // 4 - Право на копирование и перемещение
+
+    // Права, связанные с ролью (только для администраторов)
+    DELETE_USER = 1 << 3,
+    CREATE_USER = 1 << 4
 };
 
 class PermissionManager {
@@ -1301,23 +1381,19 @@ public:
     }
 
     static bool has(const User& user, Permission requiredPermission) {
+        // Администратор по-прежнему имеет полный доступ ко всему
         if (user.getRole() == Role::ADMIN) {
             return true;
         }
 
-        if (user.getRole() == Role::USER) {
-            switch (requiredPermission) {
-                case Permission::READ:
-                case Permission::WRITE:
-                case Permission::COPY_MOVE:
-                    return true;
-                case Permission::DELETE_USER:
-                case Permission::CREATE_USER:
-                    return false;
-            }
+        // Проверяем права на управление пользователями (доступно только админу)
+        if (requiredPermission == Permission::CREATE_USER || requiredPermission == Permission::DELETE_USER) {
+            return false;
         }
 
-        return false;
+        // Для всех остальных прав (файловые операции) используем битовую маску
+        // Побитовое "И" вернет ненулевое значение, только если нужный бит установлен
+        return (user.getPermissions() & static_cast<unsigned int>(requiredPermission)) != 0;
     }
 };
 ```
@@ -1346,13 +1422,15 @@ void UserManager::createUser(const std::string& username, const std::string& pas
         throw std::runtime_error("Пользователь с таким именем уже существует.");
     }
 
+    // Создаем пользователя с правами по умолчанию, заданными в конструкторе User
     auto newUser = std::make_shared<User>(username, password, Role::USER);
     m_userRepository.add(newUser);
 
     m_logger.log("Создан новый пользователь: '" + username + "'.");
 }
 
-void UserManager::createUserByAdmin(const User& actor, const std::string& username, const std::string& password) {
+// Новая реализация с параметром permissions
+void UserManager::createUserByAdmin(const User& actor, const std::string& username, const std::string& password, unsigned int permissions) {
     PermissionManager::ensure(actor, Permission::CREATE_USER);
 
     if (username.length() < 3) {
@@ -1365,7 +1443,8 @@ void UserManager::createUserByAdmin(const User& actor, const std::string& userna
         throw std::runtime_error("Пользователь с таким именем уже существует.");
     }
 
-    auto newUser = std::make_shared<User>(username, password, Role::USER);
+    // Передаем выбранную администратором маску прав в конструктор
+    auto newUser = std::make_shared<User>(username, password, Role::USER, permissions);
     m_userRepository.add(newUser);
 
     m_logger.log("Администратор '" + actor.getUsername() + "' создал нового пользователя: '" + username + "'.");
@@ -1389,7 +1468,6 @@ void UserManager::deleteUser(const User& actor, const std::string& usernameToDel
 }
 
 std::vector<std::shared_ptr<User>> UserManager::listAllUsers(const User& actor) {
-    // Для получения списка пользователей требуются те же права, что и для удаления
     PermissionManager::ensure(actor, Permission::DELETE_USER);
     return m_userRepository.getAll();
 }
@@ -1414,16 +1492,11 @@ public:
 
     void createUser(const std::string& username, const std::string& password);
 
-    void createUserByAdmin(const User& actor, const std::string& username, const std::string& password);
+    // Добавлен параметр permissions для указания прав при создании
+    void createUserByAdmin(const User& actor, const std::string& username, const std::string& password, unsigned int permissions);
 
     void deleteUser(const User& actor, const std::string& usernameToDelete);
 
-    /**
-     * @brief Возвращает список всех пользователей.
-     * @param actor Пользователь, выполняющий действие (для проверки прав).
-     * @return Вектор с указателями на пользователей.
-     * @throws std::runtime_error если у пользователя нет прав на просмотр списка.
-     */
     std::vector<std::shared_ptr<User>> listAllUsers(const User& actor);
 
 private:
