@@ -18,7 +18,7 @@ std::shared_ptr<User> Authenticator::login(const std::string& username, const st
 
     if (user->isLocked()) {
         m_logger.log("Попытка входа в заблокированный аккаунт: '" + username + "'.");
-        throw AccountLockedException("Этот аккаунт заблокирован. Обратитесь к администратору.");
+        throw AccountLockedException("Этот аккаунт заблокирован");
     }
 
     if (user->getPasswordHash() == hashPassword(password)) {

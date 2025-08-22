@@ -1,5 +1,7 @@
 #pragma once
 #include "../core/User.h"
+#include "../core/AppExceptions.h" 
+#include <string>                
 #include <stdexcept>
 
 
@@ -17,9 +19,13 @@ enum class Permission : unsigned int {
 
 class PermissionManager {
 public:
-    static void ensure(const User& user, Permission requiredPermission) {
+
+    static void ensure(const User& user, Permission requiredPermission, const std::string& actionDescription) {
         if (!has(user, requiredPermission)) {
-            throw std::runtime_error("В доступе отказано.");
+            std::string logMessage = "Пользователю '" + user.getUsername() + 
+                                     "' отказано в доступе при попытке выполнить действие: " + 
+                                     actionDescription;
+            throw PermissionDeniedException(logMessage);
         }
     }
 

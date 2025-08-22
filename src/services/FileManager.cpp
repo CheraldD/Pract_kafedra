@@ -50,7 +50,7 @@ void FileManager::ensureNotSystemFileForUser(const User& actor, const std::strin
 }
 
 void FileManager::readFile(const User& actor, const std::string& filePath) {
-    PermissionManager::ensure(actor, Permission::READ);
+    PermissionManager::ensure(actor, Permission::READ, "чтение файла '" + filePath + "'");
     ensureNotSystemFileForUser(actor, filePath); 
 
     if (!std::filesystem::exists(filePath)) {
@@ -76,7 +76,7 @@ void FileManager::readFile(const User& actor, const std::string& filePath) {
 }
 
 void FileManager::writeFile(const User& actor, const std::string& filePath, const std::string& content) {
-    PermissionManager::ensure(actor, Permission::WRITE);
+    PermissionManager::ensure(actor, Permission::WRITE, "запись в файл '" + filePath + "'");
     ensureNotSystemFileForUser(actor, filePath); 
 
     try {
@@ -99,7 +99,7 @@ void FileManager::writeFile(const User& actor, const std::string& filePath, cons
 }
 
 void FileManager::copyFile(const User& actor, const std::string& sourceStr, const std::string& destStr) {
-    PermissionManager::ensure(actor, Permission::COPY_MOVE);
+    PermissionManager::ensure(actor, Permission::COPY_MOVE, "копирование файла из '" + sourceStr + "' в '" + destStr + "'");
     ensureNotSystemFileForUser(actor, sourceStr); 
     
     if(isSystemFile(destStr) && actor.getRole() != Role::ADMIN){
@@ -123,7 +123,7 @@ void FileManager::copyFile(const User& actor, const std::string& sourceStr, cons
 }
 
 void FileManager::moveFile(const User& actor, const std::string& sourceStr, const std::string& destStr) {
-    PermissionManager::ensure(actor, Permission::COPY_MOVE);
+    PermissionManager::ensure(actor, Permission::COPY_MOVE, "перемещение файла из '" + sourceStr + "' в '" + destStr + "'");
     ensureNotSystemFileForUser(actor, sourceStr); 
 
      if(isSystemFile(destStr) && actor.getRole() != Role::ADMIN){

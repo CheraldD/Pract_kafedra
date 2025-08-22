@@ -1,36 +1,6 @@
-# Полный Исходный Код Проекта Системы Управления Доступом
-_Сгенерировано: 2025-08-22 17:15:09_
+Файл: src/auth/AuthExceptions.h
+-------------------------------
 
-## Содержание
-- [`src/auth/AuthExceptions.h`](#srcauthAuthExceptionsh)
-- [`src/auth/Authenticator.cpp`](#srcauthAuthenticatorcpp)
-- [`src/auth/Authenticator.h`](#srcauthAuthenticatorh)
-- [`src/cli/CLI.cpp`](#srccliCLIcpp)
-- [`src/cli/CLI.h`](#srccliCLIh)
-- [`src/core/ILogger.h`](#srccoreILoggerh)
-- [`src/core/IUserRepository.h`](#srccoreIUserRepositoryh)
-- [`src/core/Role.h`](#srccoreRoleh)
-- [`src/core/SystemSettings.h`](#srccoreSystemSettingsh)
-- [`src/core/User.cpp`](#srccoreUsercpp)
-- [`src/core/User.h`](#srccoreUserh)
-- [`src/infrastructure/FileLogger.cpp`](#srcinfrastructureFileLoggercpp)
-- [`src/infrastructure/FileLogger.h`](#srcinfrastructureFileLoggerh)
-- [`src/infrastructure/FileUserRepository.cpp`](#srcinfrastructureFileUserRepositorycpp)
-- [`src/infrastructure/FileUserRepository.h`](#srcinfrastructureFileUserRepositoryh)
-- [`src/main.cpp`](#srcmaincpp)
-- [`src/services/FileManager.cpp`](#srcservicesFileManagercpp)
-- [`src/services/FileManager.h`](#srcservicesFileManagerh)
-- [`src/services/PermissionManager.h`](#srcservicesPermissionManagerh)
-- [`src/services/UserManager.cpp`](#srcservicesUserManagercpp)
-- [`src/services/UserManager.h`](#srcservicesUserManagerh)
-- [`src/utils/Hash.cpp`](#srcutilsHashcpp)
-- [`src/utils/Hash.h`](#srcutilsHashh)
-
----
-
-## <a name="srcauthAuthExceptionsh"></a>Файл: `src/auth/AuthExceptions.h`
-
-```cpp
 #pragma once
 #include <stdexcept>
 class AuthenticationException : public std::runtime_error {
@@ -48,14 +18,9 @@ public:
 class InvalidCredentialsException : public AuthenticationException {
 public:
     using AuthenticationException::AuthenticationException;
-};
-```
+};Файл: src/auth/Authenticator.cpp
+--------------------------------
 
----
-
-## <a name="srcauthAuthenticatorcpp"></a>Файл: `src/auth/Authenticator.cpp`
-
-```cpp
 #include "Authenticator.h"
 #include "../core/User.h"
 #include "../core/SystemSettings.h" 
@@ -76,7 +41,7 @@ std::shared_ptr<User> Authenticator::login(const std::string& username, const st
 
     if (user->isLocked()) {
         m_logger.log("Попытка входа в заблокированный аккаунт: '" + username + "'.");
-        throw AccountLockedException("Этот аккаунт заблокирован. Обратитесь к администратору.");
+        throw AccountLockedException("Этот аккаунт заблокирован");
     }
 
     if (user->getPasswordHash() == hashPassword(password)) {
@@ -106,14 +71,9 @@ std::shared_ptr<User> Authenticator::login(const std::string& username, const st
         
         throw InvalidCredentialsException("Неверный пароль.");
     }
-}
-```
+}Файл: src/auth/Authenticator.h
+------------------------------
 
----
-
-## <a name="srcauthAuthenticatorh"></a>Файл: `src/auth/Authenticator.h`
-
-```cpp
 #pragma once
 #include "../core/IUserRepository.h"
 #include "../core/ILogger.h"
@@ -129,14 +89,9 @@ private:
     IUserRepository& m_userRepository;
     ILogger& m_logger;
     SystemSettings& m_settings;
-};
-```
+};Файл: src/cli/CLI.cpp
+---------------------
 
----
-
-## <a name="srccliCLIcpp"></a>Файл: `src/cli/CLI.cpp`
-
-```cpp
 #include "CLI.h"
 #include <iostream>
 #include <limits>
@@ -153,6 +108,8 @@ private:
 #include "../services/PermissionManager.h" 
 #include "../core/User.h"
 #include "../core/SystemSettings.h"
+#include "../core/ILogger.h"
+#include "../core/AppExceptions.h" 
 
 namespace {
     namespace Color {
@@ -250,11 +207,12 @@ namespace {
 
 } 
 
-CLI::CLI(Authenticator& auth, UserManager& userManager, FileManager& fileManager, SystemSettings& settings)
+CLI::CLI(Authenticator& auth, UserManager& userManager, FileManager& fileManager, SystemSettings& settings, ILogger& logger)
     : m_auth(auth),
       m_userManager(userManager),
       m_fileManager(fileManager),
       m_settings(settings),
+      m_logger(logger),
       m_currentUser(nullptr),
       m_shouldRun(true) {}
 
@@ -416,7 +374,7 @@ void CLI::handleUserActions() {
             continue;
         }
         
-        clearInputBuffer();
+        clearInputBuffer(); 
 
         try {
             switch (choice) {
@@ -559,18 +517,18 @@ void CLI::handleUserActions() {
                     std::cout << "\n" << Color::RED << "[✗] " << Color::RESET << "Неизвестная команда. Попробуйте еще раз." << std::endl;
                     break;
             }
+        } catch (const PermissionDeniedException& e) {
+         
+            m_logger.log("ОТКАЗ В ДОСТУПЕ: " + std::string(e.what()));
+          
+            std::cerr << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Операция не удалась: В доступе отказано." << std::endl;
         } catch (const std::exception& e) {
             std::cerr << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Операция не удалась: " << e.what() << std::endl;
         }
     }
-}
-```
+}Файл: src/cli/CLI.h
+-------------------
 
----
-
-## <a name="srccliCLIh"></a>Файл: `src/cli/CLI.h`
-
-```cpp
 #pragma once
 #include <memory>
 
@@ -580,10 +538,11 @@ class UserManager;
 class FileManager;
 class User;
 struct SystemSettings;
+class ILogger; 
 
 class CLI {
 public:
-    CLI(Authenticator& auth, UserManager& userManager, FileManager& fileManager, SystemSettings& settings);
+    CLI(Authenticator& auth, UserManager& userManager, FileManager& fileManager, SystemSettings& settings, ILogger& logger);
     void run();
 
 private:
@@ -597,30 +556,30 @@ private:
     UserManager& m_userManager;
     FileManager& m_fileManager;
     SystemSettings& m_settings; 
+    ILogger& m_logger; 
     std::shared_ptr<User> m_currentUser;
     bool m_shouldRun;
-};
-```
+};Файл: src/core/AppExceptions.h
+------------------------------
 
----
+#pragma once
+#include <stdexcept>
 
-## <a name="srccoreILoggerh"></a>Файл: `src/core/ILogger.h`
+class PermissionDeniedException : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};Файл: src/core/ILogger.h
+------------------------
 
-```cpp
 #pragma once
 #include <string>
 class ILogger {
 public:
     virtual ~ILogger() = default;
     virtual void log(const std::string& message) = 0;
-};
-```
+};Файл: src/core/IUserRepository.h
+--------------------------------
 
----
-
-## <a name="srccoreIUserRepositoryh"></a>Файл: `src/core/IUserRepository.h`
-
-```cpp
 #pragma once
 #include <string>
 #include <memory>
@@ -641,26 +600,16 @@ public:
     virtual void update(std::shared_ptr<User> user) = 0;
 
     virtual void remove(const std::string& username) = 0;
-};
-```
+};Файл: src/core/Role.h
+---------------------
 
----
-
-## <a name="srccoreRoleh"></a>Файл: `src/core/Role.h`
-
-```cpp
 #pragma once
 enum class Role {
     USER,  
     ADMIN  
-};
-```
+};Файл: src/core/SystemSettings.h
+-------------------------------
 
----
-
-## <a name="srccoreSystemSettingsh"></a>Файл: `src/core/SystemSettings.h`
-
-```cpp
 #pragma once
 #include <string>
 #include <fstream>
@@ -696,14 +645,9 @@ public:
             std::cerr << "Предупреждение: Не удалось сохранить файл настроек: " << m_configFilePath << std::endl;
         }
     }
-};
-```
+};Файл: src/core/User.cpp
+-----------------------
 
----
-
-## <a name="srccoreUsercpp"></a>Файл: `src/core/User.cpp`
-
-```cpp
 #include "User.h"
 #include "../utils/Hash.h" 
 #include "../services/PermissionManager.h" 
@@ -775,14 +719,9 @@ void User::incrementFailedAttempts() {
 
 void User::resetFailedAttempts() {
     m_failedLoginAttempts = 0;
-}
-```
+}Файл: src/core/User.h
+---------------------
 
----
-
-## <a name="srccoreUserh"></a>Файл: `src/core/User.h`
-
-```cpp
 #pragma once
 #include <string>
 #include "Role.h"
@@ -819,14 +758,9 @@ private:
     bool m_isLocked;
     int m_failedLoginAttempts;
     unsigned int m_permissions; 
-};
-```
+};Файл: src/infrastructure/FileLogger.cpp
+---------------------------------------
 
----
-
-## <a name="srcinfrastructureFileLoggercpp"></a>Файл: `src/infrastructure/FileLogger.cpp`
-
-```cpp
 #include "FileLogger.h"
 #include <chrono>    
 #include <iomanip>  
@@ -867,14 +801,9 @@ void FileLogger::log(const std::string& message) {
                   << message 
                   << std::endl; 
     }
-}
-```
+}Файл: src/infrastructure/FileLogger.h
+-------------------------------------
 
----
-
-## <a name="srcinfrastructureFileLoggerh"></a>Файл: `src/infrastructure/FileLogger.h`
-
-```cpp
 #pragma once
 #include "../core/ILogger.h"
 #include <string>
@@ -895,14 +824,9 @@ public:
 private:
     std::ofstream m_logFile; 
     std::mutex m_mutex;      
-};
-```
+};Файл: src/infrastructure/FileUserRepository.cpp
+-----------------------------------------------
 
----
-
-## <a name="srcinfrastructureFileUserRepositorycpp"></a>Файл: `src/infrastructure/FileUserRepository.cpp`
-
-```cpp
 #include "FileUserRepository.h"
 #include "../core/User.h"
 #include <fstream>
@@ -1001,14 +925,9 @@ void FileUserRepository::remove(const std::string& username) {
         throw std::runtime_error("Невозможно удалить несуществующего пользователя: " + username);
     }
     saveToFile();
-}
-```
+}Файл: src/infrastructure/FileUserRepository.h
+---------------------------------------------
 
----
-
-## <a name="srcinfrastructureFileUserRepositoryh"></a>Файл: `src/infrastructure/FileUserRepository.h`
-
-```cpp
 #pragma once
 #include "../core/IUserRepository.h"
 #include <string>
@@ -1038,14 +957,9 @@ private:
     std::string m_dbPath;
     std::map<std::string, std::shared_ptr<User>> m_usersCache;
     std::mutex m_mutex;
-};
-```
+};Файл: src/main.cpp
+------------------
 
----
-
-## <a name="srcmaincpp"></a>Файл: `src/main.cpp`
-
-```cpp
 #include <iostream>
 #include <memory>
 #include <string>
@@ -1080,7 +994,7 @@ int main() {
         FileManager fileManager(logger, LOG_FILE_PATH, USER_DATA_PATH, SETTINGS_FILE_PATH);
        
         
-        CLI cli(auth, userManager, fileManager, settings);
+        CLI cli(auth, userManager, fileManager, settings, logger);
         cli.run();
 
     } catch (const std::exception& e) {
@@ -1088,14 +1002,9 @@ int main() {
         return 1;
     }
     return 0;
-}
-```
+}Файл: src/services/FileManager.cpp
+----------------------------------
 
----
-
-## <a name="srcservicesFileManagercpp"></a>Файл: `src/services/FileManager.cpp`
-
-```cpp
 #include "FileManager.h"
 #include "PermissionManager.h"
 #include <fstream>
@@ -1148,7 +1057,7 @@ void FileManager::ensureNotSystemFileForUser(const User& actor, const std::strin
 }
 
 void FileManager::readFile(const User& actor, const std::string& filePath) {
-    PermissionManager::ensure(actor, Permission::READ);
+    PermissionManager::ensure(actor, Permission::READ, "чтение файла '" + filePath + "'");
     ensureNotSystemFileForUser(actor, filePath); 
 
     if (!std::filesystem::exists(filePath)) {
@@ -1174,7 +1083,7 @@ void FileManager::readFile(const User& actor, const std::string& filePath) {
 }
 
 void FileManager::writeFile(const User& actor, const std::string& filePath, const std::string& content) {
-    PermissionManager::ensure(actor, Permission::WRITE);
+    PermissionManager::ensure(actor, Permission::WRITE, "запись в файл '" + filePath + "'");
     ensureNotSystemFileForUser(actor, filePath); 
 
     try {
@@ -1197,7 +1106,7 @@ void FileManager::writeFile(const User& actor, const std::string& filePath, cons
 }
 
 void FileManager::copyFile(const User& actor, const std::string& sourceStr, const std::string& destStr) {
-    PermissionManager::ensure(actor, Permission::COPY_MOVE);
+    PermissionManager::ensure(actor, Permission::COPY_MOVE, "копирование файла из '" + sourceStr + "' в '" + destStr + "'");
     ensureNotSystemFileForUser(actor, sourceStr); 
     
     if(isSystemFile(destStr) && actor.getRole() != Role::ADMIN){
@@ -1221,7 +1130,7 @@ void FileManager::copyFile(const User& actor, const std::string& sourceStr, cons
 }
 
 void FileManager::moveFile(const User& actor, const std::string& sourceStr, const std::string& destStr) {
-    PermissionManager::ensure(actor, Permission::COPY_MOVE);
+    PermissionManager::ensure(actor, Permission::COPY_MOVE, "перемещение файла из '" + sourceStr + "' в '" + destStr + "'");
     ensureNotSystemFileForUser(actor, sourceStr); 
 
      if(isSystemFile(destStr) && actor.getRole() != Role::ADMIN){
@@ -1242,14 +1151,9 @@ void FileManager::moveFile(const User& actor, const std::string& sourceStr, cons
     } catch (const std::filesystem::filesystem_error& e) {
         throw std::runtime_error("Операция перемещения не удалась. " + std::string(e.what()));
     }
-}
-```
+}Файл: src/services/FileManager.h
+--------------------------------
 
----
-
-## <a name="srcservicesFileManagerh"></a>Файл: `src/services/FileManager.h`
-
-```cpp
 #pragma once
 #include "../core/ILogger.h"
 #include "../core/User.h"
@@ -1276,16 +1180,13 @@ private:
     bool isSystemFile(const std::string& path_str) const;
     void ensureNotSystemFileForUser(const User& actor, const std::string& path) const;
    
-};
-```
+};Файл: src/services/PermissionManager.h
+--------------------------------------
 
----
-
-## <a name="srcservicesPermissionManagerh"></a>Файл: `src/services/PermissionManager.h`
-
-```cpp
 #pragma once
 #include "../core/User.h"
+#include "../core/AppExceptions.h" 
+#include <string>                
 #include <stdexcept>
 
 
@@ -1303,9 +1204,13 @@ enum class Permission : unsigned int {
 
 class PermissionManager {
 public:
-    static void ensure(const User& user, Permission requiredPermission) {
+
+    static void ensure(const User& user, Permission requiredPermission, const std::string& actionDescription) {
         if (!has(user, requiredPermission)) {
-            throw std::runtime_error("В доступе отказано.");
+            std::string logMessage = "Пользователю '" + user.getUsername() + 
+                                     "' отказано в доступе при попытке выполнить действие: " + 
+                                     actionDescription;
+            throw PermissionDeniedException(logMessage);
         }
     }
 
@@ -1321,14 +1226,9 @@ public:
         }
         return (user.getPermissions() & static_cast<unsigned int>(requiredPermission)) != 0;
     }
-};
-```
+};Файл: src/services/UserManager.cpp
+----------------------------------
 
----
-
-## <a name="srcservicesUserManagercpp"></a>Файл: `src/services/UserManager.cpp`
-
-```cpp
 #include "UserManager.h"
 #include "PermissionManager.h"
 #include <memory>
@@ -1356,7 +1256,7 @@ void UserManager::createUser(const std::string& username, const std::string& pas
 
 
 void UserManager::createUserByAdmin(const User& actor, const std::string& username, const std::string& password, unsigned int permissions) {
-    PermissionManager::ensure(actor, Permission::CREATE_USER);
+    PermissionManager::ensure(actor, Permission::CREATE_USER, "создание пользователя '" + username + "'");
 
     if (username.length() < 3) {
         throw std::runtime_error("Имя пользователя должно быть не менее 3 символов.");
@@ -1376,7 +1276,7 @@ void UserManager::createUserByAdmin(const User& actor, const std::string& userna
 
 
 void UserManager::deleteUser(const User& actor, const std::string& usernameToDelete) {
-    PermissionManager::ensure(actor, Permission::DELETE_USER);
+    PermissionManager::ensure(actor, Permission::DELETE_USER, "удаление пользователя '" + usernameToDelete + "'");
     
     if (actor.getUsername() == usernameToDelete) {
         throw std::runtime_error("Вы не можете удалить свой собственный аккаунт.");
@@ -1392,16 +1292,11 @@ void UserManager::deleteUser(const User& actor, const std::string& usernameToDel
 }
 
 std::vector<std::shared_ptr<User>> UserManager::listAllUsers(const User& actor) {
-    PermissionManager::ensure(actor, Permission::DELETE_USER);
+    PermissionManager::ensure(actor, Permission::DELETE_USER, "просмотр списка всех пользователей");
     return m_userRepository.getAll();
-}
-```
+}Файл: src/services/UserManager.h
+--------------------------------
 
----
-
-## <a name="srcservicesUserManagerh"></a>Файл: `src/services/UserManager.h`
-
-```cpp
 #pragma once
 #include "../core/IUserRepository.h"
 #include "../core/ILogger.h"
@@ -1425,46 +1320,18 @@ public:
 private:
     IUserRepository& m_userRepository;
     ILogger& m_logger;
-};
-```
+};Файл: src/utils/Hash.cpp
+------------------------
 
----
-
-## <a name="srcutilsHashcpp"></a>Файл: `src/utils/Hash.cpp`
-
-```cpp
 #include "Hash.h"
-#include <functional> // для std::hash
+#include <functional> 
 
 size_t hashPassword(const std::string& password) {
-    // "Соль" - это случайная строка, добавляемая к паролю перед хешированием.
-    // В реальной системе она должна быть уникальной для каждого пользователя.
-    // Здесь мы используем статическую соль для упрощения.
     const std::string salt = "a1b2-c3d4-e5f6-a-static-salt-for-a-university-project";
-    
-    // std::hash - простая хеш-функция, не предназначенная для криптографии.
-    return std::hash<std::string>{}(password + salt);
-}
-```
+        return std::hash<std::string>{}(password + salt);
+}Файл: src/utils/Hash.h
+----------------------
 
----
-
-## <a name="srcutilsHashh"></a>Файл: `src/utils/Hash.h`
-
-```cpp
 #pragma once
 #include <string>
-
-/**
- * @brief Хеширует пароль с использованием стандартной библиотеки.
- * @warning ВАЖНО: Этот метод АБСОЛЮТНО НЕБЕЗОПАСЕН для использования
- * в реальных приложениях. Он создан исключительно для учебных целей,
- * чтобы избежать внешних зависимостей.
- * @param password Пароль в виде открытого текста.
- * @return Хеш пароля.
- */
 size_t hashPassword(const std::string& password);
-```
-
----
-

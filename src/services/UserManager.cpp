@@ -25,7 +25,7 @@ void UserManager::createUser(const std::string& username, const std::string& pas
 
 
 void UserManager::createUserByAdmin(const User& actor, const std::string& username, const std::string& password, unsigned int permissions) {
-    PermissionManager::ensure(actor, Permission::CREATE_USER);
+    PermissionManager::ensure(actor, Permission::CREATE_USER, "создание пользователя '" + username + "'");
 
     if (username.length() < 3) {
         throw std::runtime_error("Имя пользователя должно быть не менее 3 символов.");
@@ -45,7 +45,7 @@ void UserManager::createUserByAdmin(const User& actor, const std::string& userna
 
 
 void UserManager::deleteUser(const User& actor, const std::string& usernameToDelete) {
-    PermissionManager::ensure(actor, Permission::DELETE_USER);
+    PermissionManager::ensure(actor, Permission::DELETE_USER, "удаление пользователя '" + usernameToDelete + "'");
     
     if (actor.getUsername() == usernameToDelete) {
         throw std::runtime_error("Вы не можете удалить свой собственный аккаунт.");
@@ -61,6 +61,6 @@ void UserManager::deleteUser(const User& actor, const std::string& usernameToDel
 }
 
 std::vector<std::shared_ptr<User>> UserManager::listAllUsers(const User& actor) {
-    PermissionManager::ensure(actor, Permission::DELETE_USER);
+    PermissionManager::ensure(actor, Permission::DELETE_USER, "просмотр списка всех пользователей");
     return m_userRepository.getAll();
 }

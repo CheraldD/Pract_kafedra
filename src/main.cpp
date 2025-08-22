@@ -32,7 +32,7 @@ int main() {
         FileManager fileManager(logger, LOG_FILE_PATH, USER_DATA_PATH, SETTINGS_FILE_PATH);
        
         
-        CLI cli(auth, userManager, fileManager, settings);
+        CLI cli(auth, userManager, fileManager, settings, logger);
         cli.run();
 
     } catch (const std::exception& e) {

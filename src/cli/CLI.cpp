@@ -14,6 +14,8 @@
 #include "../services/PermissionManager.h" 
 #include "../core/User.h"
 #include "../core/SystemSettings.h"
+#include "../core/ILogger.h"
+#include "../core/AppExceptions.h" 
 
 namespace {
     namespace Color {
@@ -111,11 +113,12 @@ namespace {
 
 } 
 
-CLI::CLI(Authenticator& auth, UserManager& userManager, FileManager& fileManager, SystemSettings& settings)
+CLI::CLI(Authenticator& auth, UserManager& userManager, FileManager& fileManager, SystemSettings& settings, ILogger& logger)
     : m_auth(auth),
       m_userManager(userManager),
       m_fileManager(fileManager),
       m_settings(settings),
+      m_logger(logger),
       m_currentUser(nullptr),
       m_shouldRun(true) {}
 
@@ -277,7 +280,7 @@ void CLI::handleUserActions() {
             continue;
         }
         
-        clearInputBuffer();
+        clearInputBuffer(); 
 
         try {
             switch (choice) {
@@ -420,6 +423,11 @@ void CLI::handleUserActions() {
                     std::cout << "\n" << Color::RED << "[✗] " << Color::RESET << "Неизвестная команда. Попробуйте еще раз." << std::endl;
                     break;
             }
+        } catch (const PermissionDeniedException& e) {
+         
+            m_logger.log("ОТКАЗ В ДОСТУПЕ: " + std::string(e.what()));
+          
+            std::cerr << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Операция не удалась: В доступе отказано." << std::endl;
         } catch (const std::exception& e) {
             std::cerr << "\n" << Color::BRIGHT_RED << "[✗] " << Color::RESET << "Операция не удалась: " << e.what() << std::endl;
         }

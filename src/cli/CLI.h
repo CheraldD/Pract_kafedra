@@ -7,10 +7,11 @@ class UserManager;
 class FileManager;
 class User;
 struct SystemSettings;
+class ILogger; 
 
 class CLI {
 public:
-    CLI(Authenticator& auth, UserManager& userManager, FileManager& fileManager, SystemSettings& settings);
+    CLI(Authenticator& auth, UserManager& userManager, FileManager& fileManager, SystemSettings& settings, ILogger& logger);
     void run();
 
 private:
@@ -24,6 +25,7 @@ private:
     UserManager& m_userManager;
     FileManager& m_fileManager;
     SystemSettings& m_settings; 
+    ILogger& m_logger; 
     std::shared_ptr<User> m_currentUser;
     bool m_shouldRun;
 };
